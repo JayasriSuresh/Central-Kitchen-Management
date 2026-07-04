@@ -1,15 +1,215 @@
-// This is your Prisma schema file,
-// learn more about it in the docs: https://pris.ly/d/prisma-schema
-
-// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
-// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
-
 generator client {
-  provider = "prisma-client"
-  output   = "../generated/prisma"
+  provider = "prisma-client-js"
 }
 
 datasource db {
-  provider = "postgresql"
+  provider = "mysql"
   url      = env("DATABASE_URL")
+}
+
+model Tenant {
+  id         Int      @id @default(autoincrement())
+  ck_no      Int      @unique              // NEW: independent sequence, starts at 100
+  name       String
+  code       String   @unique
+  status     String   @default("active")
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+
+  roles       Role[]
+  users       User[]
+  restaurants Restaurant[]
+  code_counters UserCodeCounter[]           // NEW
+
+  @@map("tenants")
+}
+
+model Role {
+  id             Int       @id @default(autoincrement())
+  tenant_id      Int?
+  name           String
+  code           String
+  type           String    @default("central_kitchen")
+  is_system_role Boolean   @default(false)
+  created_at     DateTime  @default(now())
+  deleted_at     DateTime?
+
+  tenant           Tenant?          @relation(fields: [tenant_id], references: [id])
+  users            User[]
+  role_permissions RolePermission[]
+  restaurant_users RestaurantUser[]
+
+  @@unique([tenant_id, name])
+  @@unique([tenant_id, code])
+  @@map("roles")
+}
+
+model Permission {
+  id     Int    @id @default(autoincrement())
+  module String
+  action String
+  code   String @unique
+
+  role_permissions RolePermission[]
+
+  @@map("permissions")
+}
+
+model RolePermission {
+  id            Int    @id @default(autoincrement())
+  role_id       Int
+  permission_id Int
+
+  role       Role       @relation(fields: [role_id], references: [id], onDelete: Cascade)
+  permission Permission @relation(fields: [permission_id], references: [id], onDelete: Cascade)
+
+  @@unique([role_id, permission_id])
+  @@map("role_permissions")
+}
+
+model User {
+  id                 Int       @id @default(autoincrement())
+  user_id            String    @unique
+  tenant_id          Int
+  restaurant_id      Int?
+  name               String
+  username           String                          // NEW
+  email              String
+  mobile             String
+  password_hash      String
+  role_id            Int
+  email_verified     Boolean   @default(false)
+  mobile_verified    Boolean   @default(false)
+  status             String    @default("active")
+  failed_login_count Int       @default(0)            // NEW
+  locked_until       DateTime?                          // NEW
+  last_login_at      DateTime?
+  created_by         String?
+  updated_by         String?
+  created_at         DateTime  @default(now())
+  updated_at         DateTime  @updatedAt
+  deleted_at         DateTime?
+
+  tenant                Tenant               @relation(fields: [tenant_id], references: [id])
+  role                  Role                 @relation(fields: [role_id], references: [id])
+  restaurant             Restaurant?         @relation(fields: [restaurant_id], references: [id])
+  restaurant_users      RestaurantUser[]
+  password_reset_tokens PasswordResetToken[]
+  otp_codes             OtpCode[]
+  login_attempts        LoginAttempt[]
+  refresh_tokens        RefreshToken[]
+
+  @@unique([tenant_id, username])                     // NEW
+  @@unique([tenant_id, email])
+  @@unique([tenant_id, mobile])
+  @@map("users")
+}
+
+model UserCodeCounter {
+  id             Int  @id @default(autoincrement())
+  tenant_id      Int
+  restaurant_id  Int?
+  role_code      String
+  last_sequence  Int  @default(0)
+
+  tenant Tenant @relation(fields: [tenant_id], references: [id])
+
+  @@unique([tenant_id, restaurant_id, role_code])
+  @@map("user_code_counters")
+}
+
+model Restaurant {
+  id             Int      @id @default(autoincrement())
+  tenant_id      Int
+  restaurant_no  Int                        // NEW: independent sequence, starts at 001 PER TENANT
+  name           String
+  created_at     DateTime @default(now())
+
+  tenant           Tenant           @relation(fields: [tenant_id], references: [id])
+  restaurant_users RestaurantUser[]
+  users            User[]
+
+  @@unique([tenant_id, restaurant_no])      // NEW: uniqueness is per-tenant, not global
+  @@map("restaurants")
+}
+
+model RestaurantUser {
+  id            Int     @id @default(autoincrement())
+  restaurant_id Int
+  user_id       Int
+  role_id       Int?
+
+  restaurant Restaurant @relation(fields: [restaurant_id], references: [id], onDelete: Cascade)
+  user       User       @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  role       Role?      @relation(fields: [role_id], references: [id])
+
+  @@unique([restaurant_id, user_id])
+  @@map("restaurant_users")
+}
+
+model PasswordResetToken {
+  id         Int       @id @default(autoincrement())
+  user_id    Int
+  token      String
+  expires_at DateTime
+  used_at    DateTime?
+
+  user User @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  @@map("password_reset_tokens")
+}
+
+model OtpCode {
+  id          Int       @id @default(autoincrement())
+  user_id     Int
+  code        String
+  purpose     String
+  expires_at  DateTime
+  verified_at DateTime?
+
+  user User @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  @@map("otp_codes")
+}
+
+model LoginAttempt {
+  id              Int      @id @default(autoincrement())
+  email_or_mobile String
+  user_id         Int?
+  ip_address      String?
+  success         Boolean
+  attempted_at    DateTime @default(now())
+
+  user User? @relation(fields: [user_id], references: [id], onDelete: SetNull)
+
+  @@map("login_attempts")
+}
+
+model RefreshToken {
+  id         Int       @id @default(autoincrement())
+  user_id    Int
+  token      String
+  expires_at DateTime
+  revoked_at DateTime?
+
+  user            User            @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  device_sessions DeviceSession[]
+
+  @@map("refresh_tokens")
+}
+
+model DeviceSession {
+  id               Int       @id @default(autoincrement())
+  user_id          Int
+  refresh_token_id Int
+  device_name      String?
+  ip_address       String?
+  user_agent       String?
+  last_seen_at     DateTime  @default(now())
+  revoked_at       DateTime?
+  created_at       DateTime  @default(now())
+
+  refresh_token RefreshToken @relation(fields: [refresh_token_id], references: [id], onDelete: Cascade)
+
+  @@map("device_sessions")
 }

@@ -1,0 +1,358 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+
+/* ============================================
+   TOKENS
+   ============================================ */
+:root {
+  --white:        #ffffff;
+  --bg:           #fafafa;
+  --border:       #dbdbdb;
+  --border-focus: #a8a8a8;
+  --text:         #262626;
+  --text-light:   #737373;
+  --blue:         #0095f6;
+  --blue-dark:    #007dd1;
+  --blue-pale:    #e8f4fd;
+  --error:        #ed4956;
+  --success:      #1db954;
+  --radius:       8px;
+  --font:         'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+}
+
+/* ============================================
+   RESET
+   ============================================ */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+html { font-size: 16px; }
+body {
+  font-family: var(--font);
+  background: var(--bg);
+  color: var(--text);
+  min-height: 100vh;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* ============================================
+   LOGIN PAGE
+   ============================================ */
+.login-page {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: 100vh;
+  padding: 1.5rem;
+  background: var(--bg);
+}
+
+/* ── Card ── */
+.login-card {
+  width: 100%;
+  max-width: 350px;
+  background: var(--white);
+  border: 1px solid var(--border);
+  border-radius: 1px;           /* Instagram uses almost no radius */
+  padding: 2.5rem 2.5rem 1.75rem;
+}
+
+/* ── Logo / Brand ── */
+.login-brand {
+  text-align: center;
+  margin-bottom: 1.75rem;
+}
+
+.login-logo {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 1.625rem;
+  font-weight: 700;
+  letter-spacing: -0.5px;
+  color: var(--text);
+}
+
+.login-logo-icon {
+  font-size: 1.75rem;
+  line-height: 1;
+}
+
+/* ── Fields ── */
+.login-field {
+  margin-bottom: 0.5rem;
+}
+
+.login-input,
+.login-select {
+  width: 100%;
+  padding: 0.625rem 0.875rem;
+  background: #fafafa;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  font-family: var(--font);
+  font-size: 0.8125rem;        /* ~13 px — same as Instagram */
+  color: var(--text);
+  outline: none;
+  transition: border-color 0.15s ease;
+  appearance: none;
+}
+
+.login-input::placeholder { color: var(--text-light); }
+
+.login-input:focus,
+.login-select:focus {
+  border-color: var(--border-focus);
+  background: var(--white);
+}
+
+/* Custom select arrow */
+.login-select-wrap {
+  position: relative;
+}
+
+.login-select-wrap::after {
+  content: '';
+  position: absolute;
+  right: 0.75rem;
+  top: 50%;
+  transform: translateY(-50%);
+  pointer-events: none;
+  width: 10px;
+  height: 6px;
+  background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 6'%3E%3Cpath d='M1 1l4 4 4-4' stroke='%23737373' stroke-width='1.4' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") center / contain no-repeat;
+}
+
+.login-select {
+  padding-right: 2rem;
+  cursor: pointer;
+  color: var(--text);
+}
+
+.login-select:disabled {
+  color: var(--text-light);
+  cursor: default;
+}
+
+/* ── Submit button ── */
+.login-btn {
+  width: 100%;
+  margin-top: 0.75rem;
+  padding: 0.5625rem;
+  background: var(--blue);
+  color: #fff;
+  border: none;
+  border-radius: var(--radius);
+  font-family: var(--font);
+  font-size: 0.875rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: opacity 0.15s ease;
+}
+
+.login-btn:hover:not(:disabled) { opacity: 0.85; }
+.login-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+/* ── Divider ── */
+.login-divider {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  margin: 1.5rem 0;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: var(--text-light);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+.login-divider::before,
+.login-divider::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: var(--border);
+}
+
+/* ── Error ── */
+.login-error {
+  font-size: 0.8125rem;
+  color: var(--error);
+  text-align: center;
+  margin-top: 0.5rem;
+  min-height: 1.25rem;
+}
+
+/* ── Spinner ── */
+.spinner {
+  display: inline-block;
+  width: 16px;
+  height: 16px;
+  border: 2px solid rgba(255,255,255,0.4);
+  border-top-color: #fff;
+  border-radius: 50%;
+  animation: spin 0.65s linear infinite;
+  vertical-align: middle;
+}
+
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* ── Footer card (create account) ── */
+.login-footer-card {
+  width: 100%;
+  max-width: 350px;
+  margin-top: 0.625rem;
+  background: var(--white);
+  border: 1px solid var(--border);
+  border-radius: 1px;
+  padding: 1.125rem;
+  text-align: center;
+  font-size: 0.875rem;
+  color: var(--text-light);
+}
+
+.login-footer-card strong {
+  color: var(--blue);
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.login-footer-card strong:hover { color: var(--blue-dark); }
+
+/* ── Bottom tagline ── */
+.login-tagline {
+  margin-top: 1.5rem;
+  font-size: 0.75rem;
+  color: var(--text-light);
+  text-align: center;
+}
+
+/* ============================================
+   DASHBOARD
+   ============================================ */
+.dash-page {
+  min-height: 100vh;
+  background: var(--bg);
+}
+
+.dash-nav {
+  background: var(--white);
+  border-bottom: 1px solid var(--border);
+  padding: 0 1.5rem;
+  height: 54px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.dash-nav-brand {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-weight: 700;
+  font-size: 1.125rem;
+  color: var(--text);
+}
+
+.dash-nav-actions { display: flex; align-items: center; gap: 0.75rem; }
+
+.dash-body {
+  max-width: 900px;
+  margin: 0 auto;
+  padding: 2rem 1.5rem;
+}
+
+.dash-welcome {
+  margin-bottom: 1.75rem;
+}
+
+.dash-welcome h1 {
+  font-size: 1.375rem;
+  font-weight: 600;
+  color: var(--text);
+  margin-bottom: 0.25rem;
+}
+
+.dash-welcome p {
+  font-size: 0.875rem;
+  color: var(--text-light);
+}
+
+.info-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  gap: 1rem;
+}
+
+.info-tile {
+  background: var(--white);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 1.25rem 1.5rem;
+}
+
+.info-tile-label {
+  font-size: 0.6875rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-light);
+  margin-bottom: 0.4rem;
+}
+
+.info-tile-value {
+  font-size: 1rem;
+  font-weight: 700;
+  color: var(--text);
+  word-break: break-all;
+}
+
+.info-tile-value.accent { color: var(--blue); }
+
+/* Buttons */
+.btn-ghost {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.45rem 0.9rem;
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  font-family: var(--font);
+  font-size: 0.8125rem;
+  font-weight: 500;
+  color: var(--text);
+  cursor: pointer;
+  transition: border-color 0.15s ease, color 0.15s ease;
+}
+
+.btn-ghost:hover {
+  border-color: var(--error);
+  color: var(--error);
+}
+
+.login-link {
+  background: none;
+  border: none;
+  padding: 0;
+  font-family: var(--font);
+  font-size: 0.8125rem;
+  color: var(--text-light);
+  cursor: pointer;
+  text-decoration: none;
+  transition: color 0.15s ease;
+}
+
+.login-link:hover { color: var(--blue); }
+
+/* ============================================
+   SHARED UTILITIES
+   ============================================ */
+.fade-in {
+  animation: fadeIn 0.2s ease forwards;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(4px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
