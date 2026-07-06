@@ -80,6 +80,7 @@ export const login = async (req: Request, res: Response) => {
         ],
         deleted_at: null,
       },
+      include: { primaryRole: { select: { type: true } } },
     });
 
     if (!user) {
@@ -147,6 +148,7 @@ export const login = async (req: Request, res: Response) => {
         name: user.name,
         email: user.email,
         primary_role_id: user.primary_role_id,
+        role_type: user.primaryRole?.type ?? 'central_kitchen',
         tenant_id: user.tenant_id,
       },
       ...tokens,
@@ -587,6 +589,7 @@ export const loginOtpVerify = async (req: Request, res: Response) => {
         name: user.name,
         email: user.email,
         primary_role_id: user.primary_role_id,
+        role_type: (user as any).primaryRole?.type ?? 'central_kitchen',
         tenant_id: user.tenant_id,
       },
       ...tokens,

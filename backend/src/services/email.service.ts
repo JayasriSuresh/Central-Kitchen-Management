@@ -121,3 +121,44 @@ export const sendResetLinkEmail = async (to: string, resetUrl: string) => {
   console.log(`✅ Reset email sent successfully! Message ID: ${info.messageId}`);
   return info;
 };
+
+/** Sends login credentials to a newly created user */
+export const sendCredentialsEmail = async (
+  to: string,
+  name: string,
+  username: string,
+  password: string,
+) => {
+  console.log(`\n🔑 [CREDENTIALS] Sending to ${to}: username=${username}, password=${password}`);
+
+  const html = `
+    <div style="font-family: Inter, Arial, sans-serif; max-width: 480px; margin: 0 auto; padding: 32px; background: #fafafa; border: 1px solid #dbdbdb; border-radius: 4px;">
+      <h2 style="color: #262626; font-size: 20px; margin: 0 0 8px;">Central Kitchen 🍽</h2>
+      <p style="color: #737373; font-size: 14px; margin: 0 0 24px;">Welcome, ${name}! Your account has been created.</p>
+      <div style="background: #fff; border: 1px solid #dbdbdb; border-radius: 4px; padding: 24px;">
+        <p style="color: #737373; font-size: 13px; margin: 0 0 12px;">Your login credentials are:</p>
+        <table style="width:100%; font-size: 14px;">
+          <tr><td style="color:#737373; padding: 4px 0;">Username / Email</td><td style="font-weight:600;">${username}</td></tr>
+          <tr><td style="color:#737373; padding: 4px 0;">Password</td><td style="font-weight:600;">${password}</td></tr>
+        </table>
+        <p style="color: #a8a8a8; font-size: 12px; margin: 16px 0 0;">Please change your password after first login.</p>
+      </div>
+    </div>
+  `;
+
+  try {
+    const transporter = createTransporter();
+    const info = await transporter.sendMail({
+      from: getFromAddress(),
+      to,
+      subject: 'Your Central Kitchen account credentials',
+      html,
+    });
+    console.log(`✅ Credentials email sent! Message ID: ${info.messageId}`);
+    return info;
+  } catch (error: any) {
+    console.error(`❌ SMTP delivery failed: ${error.message}`);
+    console.log(`ℹ️ Credentials NOT emailed. Use the console log above to share them manually.`);
+    return null;
+  }
+};

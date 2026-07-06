@@ -29,10 +29,10 @@ const systemRoles = [
 ];
 
 // ─── Admin credentials (change after first login!) ───────────────────────────
-const ADMIN_EMAIL    = 'admin@centralkitchen.com';
+const ADMIN_EMAIL    = 'jaisrisureshkumar@gmail.com';
 const ADMIN_MOBILE   = '9000000001';
 const ADMIN_NAME     = 'Super Admin';
-const ADMIN_PASSWORD = 'Admin@123';
+const ADMIN_PASSWORD = 'Jayasri@123';
 // ─────────────────────────────────────────────────────────────────────────────
 
 async function main() {

@@ -411,3 +411,447 @@ body {
   from { opacity: 0; transform: translateY(4px); }
   to   { opacity: 1; transform: translateY(0); }
 }
+
+/* ============================================
+   CENTRAL KITCHEN HOME
+   ============================================ */
+
+.ck-page { min-height: 100vh; background: #f4f5f7; }
+
+.ck-user-name {
+  font-size: 0.8125rem;
+  color: var(--text-light);
+  margin-right: 0.25rem;
+}
+
+/* ── Section tabs ── */
+.ck-tabs {
+  display: flex;
+  gap: 0;
+  background: var(--white);
+  border-bottom: 1px solid var(--border);
+  padding: 0 1.5rem;
+}
+
+.ck-tab {
+  padding: 0.875rem 1.25rem;
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  font-family: var(--font);
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: var(--text-light);
+  cursor: pointer;
+  transition: color 0.15s, border-color 0.15s;
+}
+
+.ck-tab--active {
+  color: var(--blue);
+  border-bottom-color: var(--blue);
+  font-weight: 600;
+}
+
+.ck-tab:hover:not(.ck-tab--active) { color: var(--text); }
+
+/* ── Main body ── */
+.ck-body {
+  max-width: 900px;
+  margin: 0 auto;
+  padding: 2rem 1.5rem;
+}
+
+/* ── Section header ── */
+.ck-section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 1.25rem;
+}
+
+.ck-section-title {
+  font-size: 1.25rem;
+  font-weight: 700;
+  color: var(--text);
+  margin: 0;
+}
+
+.ck-btn-add {
+  padding: 0.5rem 1rem;
+  background: var(--blue);
+  color: #fff;
+  border: none;
+  border-radius: var(--radius);
+  font-family: var(--font);
+  font-size: 0.8125rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: opacity 0.15s;
+}
+.ck-btn-add:hover { opacity: 0.85; }
+
+/* ── Form card ── */
+.ck-form-card {
+  background: var(--white);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 1.75rem;
+  margin-bottom: 1.5rem;
+}
+
+.ck-form-title {
+  font-size: 1rem;
+  font-weight: 700;
+  color: var(--text);
+  margin-bottom: 1.25rem;
+}
+
+.ck-form-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1rem;
+  margin-bottom: 1rem;
+}
+
+@media (max-width: 600px) { .ck-form-grid { grid-template-columns: 1fr; } }
+
+.ck-field { display: flex; flex-direction: column; gap: 0.3rem; }
+.ck-field--full { grid-column: 1 / -1; }
+.ck-field--check { justify-content: center; }
+
+.ck-field label {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--text-light);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.ck-input, .ck-select {
+  padding: 0.5625rem 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-family: var(--font);
+  font-size: 0.875rem;
+  color: var(--text);
+  background: #fafafa;
+  outline: none;
+  transition: border-color 0.15s;
+  width: 100%;
+}
+.ck-input:focus, .ck-select:focus { border-color: var(--blue); background: var(--white); }
+.ck-textarea { min-height: 70px; resize: vertical; }
+.ck-select { appearance: none; cursor: pointer; }
+
+.ck-check-label {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.875rem;
+  color: var(--text);
+  cursor: pointer;
+  font-weight: 500;
+  text-transform: none;
+  letter-spacing: 0;
+  margin-top: 1.4rem;
+}
+
+.ck-form-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.75rem;
+  margin-top: 1.25rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--border);
+}
+
+.ck-btn-cancel {
+  padding: 0.5rem 1rem;
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  font-family: var(--font);
+  font-size: 0.875rem;
+  color: var(--text-light);
+  cursor: pointer;
+  transition: border-color 0.15s, color 0.15s;
+}
+.ck-btn-cancel:hover { border-color: var(--text); color: var(--text); }
+
+.ck-btn-submit {
+  padding: 0.5rem 1.25rem;
+  background: var(--blue);
+  color: #fff;
+  border: none;
+  border-radius: var(--radius);
+  font-family: var(--font);
+  font-size: 0.875rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: opacity 0.15s;
+  min-width: 110px;
+  text-align: center;
+}
+.ck-btn-submit:disabled { opacity: 0.6; cursor: default; }
+.ck-btn-submit:hover:not(:disabled) { opacity: 0.85; }
+
+.ck-form-error {
+  font-size: 0.8125rem;
+  color: var(--error);
+  background: #fff0f1;
+  border: 1px solid #f5c6cb;
+  border-radius: 6px;
+  padding: 0.5rem 0.75rem;
+  margin-top: 0.75rem;
+}
+
+.ck-form-success {
+  font-size: 0.8125rem;
+  color: var(--success);
+  background: #f0fff4;
+  border: 1px solid #b2dfdb;
+  border-radius: 6px;
+  padding: 0.5rem 0.75rem;
+  margin-top: 0.75rem;
+}
+
+/* ── Recipe builder ── */
+.ck-recipe-section {
+  margin-top: 1.25rem;
+  background: #f8f9fb;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 1rem 1.25rem;
+}
+
+.ck-recipe-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 0.75rem;
+}
+
+.ck-recipe-title {
+  font-size: 0.875rem;
+  font-weight: 700;
+  color: var(--text);
+}
+
+.ck-btn-plus {
+  padding: 0.375rem 0.75rem;
+  background: var(--white);
+  border: 1px solid var(--blue);
+  border-radius: var(--radius);
+  font-family: var(--font);
+  font-size: 0.8125rem;
+  color: var(--blue);
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.ck-btn-plus:hover { background: var(--blue-pale); }
+
+.ck-recipe-table { display: flex; flex-direction: column; gap: 0.5rem; }
+
+.ck-recipe-row {
+  display: grid;
+  grid-template-columns: 2fr 1fr 1fr 32px;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.ck-recipe-row--head {
+  display: grid;
+  grid-template-columns: 2fr 1fr 1fr 32px;
+  gap: 0.5rem;
+  font-size: 0.6875rem;
+  font-weight: 700;
+  color: var(--text-light);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-bottom: 0.25rem;
+}
+
+.ck-btn-remove {
+  width: 28px; height: 28px;
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-size: 0.75rem;
+  color: var(--text-light);
+  cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+  transition: border-color 0.15s, color 0.15s;
+}
+.ck-btn-remove:hover:not(:disabled) { border-color: var(--error); color: var(--error); }
+.ck-btn-remove:disabled { opacity: 0.3; cursor: default; }
+
+/* ── List ── */
+.ck-list { display: flex; flex-direction: column; gap: 0.75rem; }
+
+.ck-empty {
+  text-align: center;
+  padding: 3rem;
+  color: var(--text-light);
+  font-size: 0.875rem;
+  background: var(--white);
+  border: 1px dashed var(--border);
+  border-radius: var(--radius);
+}
+
+.ck-list-item {
+  background: var(--white);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 1rem 1.25rem;
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 1rem;
+  transition: border-color 0.15s;
+}
+.ck-list-item:hover { border-color: #c0c4cc; }
+
+.ck-list-item-main { flex: 1; min-width: 0; }
+
+.ck-list-item-title {
+  font-size: 0.9375rem;
+  font-weight: 700;
+  color: var(--text);
+  margin-bottom: 0.35rem;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.ck-list-item-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  font-size: 0.8125rem;
+  color: var(--text-light);
+}
+
+.ck-list-item-desc {
+  font-size: 0.8125rem;
+  color: var(--text-light);
+  margin-top: 0.35rem;
+  line-height: 1.4;
+}
+
+.ck-list-item-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-shrink: 0;
+  flex-wrap: wrap;
+}
+
+.ck-btn-edit {
+  padding: 0.375rem 0.75rem;
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  font-family: var(--font);
+  font-size: 0.8125rem;
+  font-weight: 500;
+  color: var(--text);
+  cursor: pointer;
+  transition: border-color 0.15s;
+}
+.ck-btn-edit:hover { border-color: var(--blue); color: var(--blue); }
+
+.ck-btn-delete {
+  padding: 0.375rem 0.75rem;
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  font-family: var(--font);
+  font-size: 0.8125rem;
+  font-weight: 500;
+  color: var(--text-light);
+  cursor: pointer;
+  transition: border-color 0.15s, color 0.15s;
+}
+.ck-btn-delete:hover { border-color: var(--error); color: var(--error); }
+
+.ck-btn-delete-confirm {
+  padding: 0.375rem 0.75rem;
+  background: var(--error);
+  color: #fff;
+  border: none;
+  border-radius: var(--radius);
+  font-family: var(--font);
+  font-size: 0.8125rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.ck-btn-cancel-sm {
+  padding: 0.375rem 0.75rem;
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  font-family: var(--font);
+  font-size: 0.8125rem;
+  color: var(--text-light);
+  cursor: pointer;
+}
+
+.ck-confirm-text { font-size: 0.8125rem; color: var(--error); font-weight: 600; }
+
+/* ── Badges ── */
+.ck-role-badge {
+  font-size: 0.6875rem;
+  font-weight: 600;
+  background: var(--blue-pale);
+  color: var(--blue);
+  border-radius: 99px;
+  padding: 0.15rem 0.5rem;
+}
+
+.ck-cat-badge {
+  font-size: 0.6875rem;
+  font-weight: 600;
+  background: #f0fdf4;
+  color: #16a34a;
+  border-radius: 99px;
+  padding: 0.15rem 0.5rem;
+}
+
+.ck-urgent-badge {
+  font-size: 0.6875rem;
+  font-weight: 600;
+  background: #fff7ed;
+  color: #ea580c;
+  border-radius: 99px;
+  padding: 0.15rem 0.5rem;
+}
+
+.ck-status-badge {
+  font-size: 0.6875rem;
+  font-weight: 600;
+  border-radius: 99px;
+  padding: 0.15rem 0.5rem;
+}
+.ck-status-badge--active { background: #f0fdf4; color: #16a34a; }
+.ck-status-badge--inactive { background: #fef2f2; color: #dc2626; }
+
+/* ── Recipe chips on product list ── */
+.ck-recipe-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.375rem;
+  margin-top: 0.5rem;
+}
+
+.ck-recipe-chip {
+  font-size: 0.75rem;
+  background: #f8f9fb;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.2rem 0.5rem;
+  color: var(--text);
+}
+

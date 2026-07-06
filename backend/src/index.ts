@@ -6,6 +6,7 @@ import dotenv from 'dotenv';
 import authRoutes from './routes/auth.routes';
 import userRoutes from './routes/user.routes';
 import roleRoutes from './routes/role.routes';
+import adminRoutes from './routes/admin.routes';
 
 dotenv.config();
 
@@ -38,6 +39,7 @@ app.get('/health', (req: Request, res: Response) => {
 app.use('/auth', authRoutes);
 app.use('/users', userRoutes);
 app.use('/roles', roleRoutes);
+app.use('/admin', adminRoutes);
 // etc.
 
 app.listen(port, () => {
