@@ -575,3 +575,110 @@ export const deleteProduct = async (req: Request, res: Response) => {
     return res.status(500).json({ message: error.message });
   }
 };
+
+// ─── GET /admin/orders/summary ────────────────────────────────────────────────
+// Aggregates all active orders, grouped by product, with per-restaurant breakdown
+export const getOrdersSummary = async (req: Request, res: Response) => {
+  try {
+    const tenantId = getTenantId(req);
+
+    // Active statuses: exclude CANCELLED and DELIVERED
+    const activeStatuses = ['DRAFT', 'SUBMITTED', 'ACCEPTED', 'MODIFIED', 'IN_PRODUCTION', 'READY', 'PARTIALLY_DISPATCHED', 'DISPATCHED'];
+
+    const orderItems = await prisma.restaurantOrderItem.findMany({
+      where: {
+        order: {
+          tenant_id: tenantId,
+          status: { in: activeStatuses },
+          deleted_at: null,
+        },
+      },
+      include: {
+        product: {
+          select: {
+            id: true,
+            product_name: true,
+            unit: { select: { symbol: true } },
+          },
+        },
+        order: {
+          select: {
+            id: true,
+            order_number: true,
+            delivery_date: true,
+            status: true,
+            is_urgent: true,
+            restaurantTenant: {
+              select: {
+                branch_code: true,
+                restaurant: { select: { name: true } },
+              },
+            },
+          },
+        },
+      },
+      orderBy: { product_id: 'asc' },
+    });
+
+    // Group by product
+    const byProduct = new Map<number, {
+      product_id: number;
+      product_name: string;
+      unit_symbol: string;
+      total_quantity: number;
+      total_orders: number;
+      total_value: number;
+      restaurants: {
+        restaurant_name: string;
+        branch_code: string;
+        order_number: string;
+        order_id: number;
+        delivery_date: Date;
+        status: string;
+        is_urgent: boolean;
+        quantity: number;
+        total_price: number;
+      }[];
+    }>();
+
+    for (const item of orderItems) {
+      const pid = item.product_id;
+      if (!byProduct.has(pid)) {
+        byProduct.set(pid, {
+          product_id: pid,
+          product_name: item.product.product_name,
+          unit_symbol: item.product.unit?.symbol ?? 'pcs',
+          total_quantity: 0,
+          total_orders: 0,
+          total_value: 0,
+          restaurants: [],
+        });
+      }
+      const entry = byProduct.get(pid)!;
+      const qty = Number(item.quantity);
+      const val = Number(item.total_price);
+      entry.total_quantity += qty;
+      entry.total_value += val;
+      entry.total_orders += 1;
+      entry.restaurants.push({
+        restaurant_name: item.order.restaurantTenant.restaurant.name,
+        branch_code: item.order.restaurantTenant.branch_code,
+        order_number: item.order.order_number,
+        order_id: item.order.id,
+        delivery_date: item.order.delivery_date,
+        status: item.order.status,
+        is_urgent: item.order.is_urgent,
+        quantity: qty,
+        total_price: val,
+      });
+    }
+
+    const summary = Array.from(byProduct.values())
+      .sort((a, b) => b.total_quantity - a.total_quantity);
+
+    return res.status(200).json({ summary });
+  } catch (error: any) {
+    return res.status(500).json({ message: error.message });
+  }
+};
+

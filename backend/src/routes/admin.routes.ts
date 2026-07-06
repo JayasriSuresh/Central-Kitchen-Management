@@ -14,6 +14,7 @@ import {
   createProduct,
   updateProduct,
   deleteProduct,
+  getOrdersSummary,
 } from '../controllers/admin.controller';
 
 const router = Router();
@@ -41,5 +42,8 @@ router.get('/products', listProducts);
 router.post('/products', createProduct);
 router.put('/products/:id', updateProduct);
 router.delete('/products/:id', deleteProduct);
+
+// Orders summary dashboard
+router.get('/orders/summary', getOrdersSummary);
 
 export default router;

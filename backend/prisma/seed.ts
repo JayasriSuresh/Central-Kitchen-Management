@@ -215,6 +215,78 @@ async function main() {
     console.log(`   ℹ️  Jayasri user already exists (email: ${jayEmail})`);
   }
 
+  // 5. Create default Restaurant & Restaurant Admin User
+  console.log('\n5️⃣  Seeding default Restaurant and Restaurant Administrator...');
+  let restaurant = await prisma.restaurant.findFirst({ where: { name: 'South Indian Delights' } });
+  let rt = null;
+  if (!restaurant) {
+    restaurant = await prisma.restaurant.create({
+      data: { name: 'South Indian Delights', address: '123 Temple Road, Chennai', gst_number: '33AAAAA1111A1Z1', status: 'active' },
+    });
+    rt = await prisma.restaurantTenant.create({
+      data: {
+        tenant_id: tenant.id,
+        restaurant_id: restaurant.id,
+        restaurant_no: 1,
+        branch_code: 'BR-001',
+        contact_number: '9876543210',
+        status: 'active',
+      },
+    });
+    console.log(`   ✓ Created restaurant and restaurant-tenant relationship`);
+  } else {
+    rt = await prisma.restaurantTenant.findFirst({
+      where: { tenant_id: tenant.id, restaurant_id: restaurant.id },
+    });
+    console.log(`   ℹ️  Restaurant already exists`);
+  }
+
+  const restEmail = 'restadmin@centralkitchen.com';
+  const existingRestUser = await prisma.user.findFirst({
+    where: { tenant_id: tenant.id, email: restEmail },
+  });
+
+  if (!existingRestUser) {
+    const restRole = await prisma.role.findFirst({
+      where: { tenant_id: tenant.id, code: '50' }, // RESTAURANT_ADMIN
+    });
+    if (!restRole) throw new Error('RESTAURANT_ADMIN role not found for tenant');
+
+    const passwordHash = await bcrypt.hash('Jayasri@123', 12);
+    // user_id format: CCC RRR RR NNNN (CCC=100, RRR=001 (restaurant_no 1), RR=50 (role code), NNNN=0001)
+    const user_id = '100001500001';
+
+    const user = await prisma.user.create({
+      data: {
+        tenant_id: tenant.id,
+        restaurant_id: restaurant.id,
+        user_id,
+        username: user_id,
+        name: 'South Indian Delights Admin',
+        email: restEmail,
+        mobile: '9876543210',
+        password_hash: passwordHash,
+        primary_role_id: restRole.id,
+        email_verified: true,
+        status: 'active',
+      },
+    });
+
+    await prisma.userRole.create({
+      data: {
+        user_id: user.id,
+        role_id: restRole.id,
+      },
+    });
+
+    console.log(`   ✓ Created Restaurant Administrator user`);
+    console.log(`      Email   : ${restEmail}`);
+    console.log(`      Password: Jayasri@123`);
+    console.log(`      User ID : ${user_id}`);
+  } else {
+    console.log(`   ℹ️  Restaurant user already exists (email: ${restEmail})`);
+  }
+
   console.log('\n✅  Seed complete.\n');
 }
 

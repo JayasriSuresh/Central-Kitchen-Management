@@ -150,6 +150,7 @@ export const login = async (req: Request, res: Response) => {
         primary_role_id: user.primary_role_id,
         role_type: user.primaryRole?.type ?? 'central_kitchen',
         tenant_id: user.tenant_id,
+        restaurant_id: user.restaurant_id,
       },
       ...tokens,
     });
@@ -591,6 +592,7 @@ export const loginOtpVerify = async (req: Request, res: Response) => {
         primary_role_id: user.primary_role_id,
         role_type: (user as any).primaryRole?.type ?? 'central_kitchen',
         tenant_id: user.tenant_id,
+        restaurant_id: user.restaurant_id,
       },
       ...tokens,
     });

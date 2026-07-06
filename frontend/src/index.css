@@ -855,3 +855,85 @@ body {
   color: var(--text);
 }
 
+/* ============================================
+   ORDERS DASHBOARD
+   ============================================ */
+
+.ck-dash-stats {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 1rem;
+  margin-bottom: 1.5rem;
+}
+
+.ck-stat-card {
+  background: var(--white);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 1.25rem 1.5rem;
+  text-align: center;
+  transition: border-color 0.15s;
+}
+
+.ck-stat-card:hover { border-color: var(--blue); }
+
+.ck-stat-value {
+  font-size: 1.75rem;
+  font-weight: 800;
+  color: var(--text);
+  line-height: 1.1;
+  margin-bottom: 0.25rem;
+}
+
+.ck-stat-label {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--text-light);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+/* Breakdown table inside expanded product rows */
+.ck-dash-breakdown {
+  background: #f8f9fb;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  overflow: hidden;
+  width: 100%;
+}
+
+.ck-dash-breakdown-head,
+.ck-dash-breakdown-row {
+  display: grid;
+  grid-template-columns: 2fr 1.5fr 1.2fr 0.8fr 0.8fr 1fr;
+  gap: 0.5rem;
+  padding: 0.5rem 1rem;
+  align-items: center;
+  font-size: 0.8125rem;
+}
+
+.ck-dash-breakdown-head {
+  background: #f0f2f5;
+  font-size: 0.6875rem;
+  font-weight: 700;
+  color: var(--text-light);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  border-bottom: 1px solid var(--border);
+}
+
+.ck-dash-breakdown-row {
+  border-bottom: 1px solid #f0f0f0;
+  color: var(--text);
+}
+
+.ck-dash-breakdown-row:last-child { border-bottom: none; }
+.ck-dash-breakdown-row:hover { background: #f4f5f7; }
+
+@media (max-width: 640px) {
+  .ck-dash-stats { grid-template-columns: 1fr; }
+  .ck-dash-breakdown-head,
+  .ck-dash-breakdown-row { grid-template-columns: 1fr 1fr; }
+}
+
+

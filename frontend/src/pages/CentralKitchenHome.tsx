@@ -48,12 +48,38 @@ const emptyProduct = () => ({
 const emptyRecipeRow = (): RecipeRow => ({ raw_material_id: '', quantity: '', unit_id: '' });
 
 // ─── Section Tab ──────────────────────────────────────────────────────────────
-type Section = 'restaurants' | 'users' | 'products';
+type Section = 'dashboard' | 'restaurants' | 'users' | 'products';
+
+interface RestaurantOrderLine {
+  restaurant_name: string;
+  branch_code: string;
+  order_number: string;
+  order_id: number;
+  delivery_date: string;
+  status: string;
+  is_urgent: boolean;
+  quantity: number;
+  total_price: number;
+}
+
+interface OrderSummaryItem {
+  product_id: number;
+  product_name: string;
+  unit_symbol: string;
+  total_quantity: number;
+  total_orders: number;
+  total_value: number;
+  restaurants: RestaurantOrderLine[];
+}
 
 export default function CentralKitchenHome() {
   const { user, accessToken, logout } = useAuth();
   const navigate = useNavigate();
-  const [section, setSection] = useState<Section>('restaurants');
+  const [section, setSection] = useState<Section>('dashboard');
+
+  // Orders dashboard
+  const [ordersSummary, setOrdersSummary] = useState<OrderSummaryItem[]>([]);
+  const [expandedProductId, setExpandedProductId] = useState<number | null>(null);
 
   // Dropdown data
   const [roles, setRoles] = useState<Role[]>([]);
@@ -85,11 +111,12 @@ export default function CentralKitchenHome() {
 
   const fetchAll = useCallback(async () => {
     try {
-      const [dd, rRes, uRes, pRes] = await Promise.all([
+      const [dd, rRes, uRes, pRes, sRes] = await Promise.all([
         axios.get(`${API}/admin/dropdown-data`, { headers: authHeader }),
         axios.get(`${API}/admin/restaurants`, { headers: authHeader }),
         axios.get(`${API}/admin/users/ck`, { headers: authHeader }),
         axios.get(`${API}/admin/products`, { headers: authHeader }),
+        axios.get(`${API}/admin/orders/summary`, { headers: authHeader }),
       ]);
       setRoles(dd.data.roles);
       setCategories(dd.data.categories);
@@ -98,7 +125,9 @@ export default function CentralKitchenHome() {
       setRestaurants(rRes.data.restaurants);
       setCkUsers(uRes.data.users);
       setProducts(pRes.data.products);
+      setOrdersSummary(sRes.data.summary);
     } catch (err: any) {
+      if (err.response?.status === 401) { logout(); navigate('/login'); }
       console.error('Failed to load data', err);
     }
   }, [accessToken]);
@@ -218,20 +247,116 @@ export default function CentralKitchenHome() {
 
       {/* Section tabs */}
       <div className="ck-tabs">
-        {(['restaurants', 'users', 'products'] as Section[]).map(s => (
+        {(['dashboard', 'restaurants', 'users', 'products'] as Section[]).map(s => (
           <button
             key={s}
             id={`tab-${s}`}
             className={`ck-tab ${section === s ? 'ck-tab--active' : ''}`}
-            onClick={() => { setSection(s); setShowForm(false); setDeleteConfirm(null); }}
+            onClick={() => { setSection(s); setShowForm(false); setDeleteConfirm(null); setExpandedProductId(null); }}
           >
-            {s === 'restaurants' ? '🏪 Restaurants' : s === 'users' ? '👤 Users' : '📦 Products'}
+            {s === 'dashboard' ? '📊 Orders' : s === 'restaurants' ? '🏪 Restaurants' : s === 'users' ? '👤 Users' : '📦 Products'}
           </button>
         ))}
-      </div>
+        </div>
 
       <main className="ck-body">
-        {/* Header row */}
+        {/* ── ORDERS DASHBOARD ── */}
+        {section === 'dashboard' && (
+          <div className="fade-in">
+            <div className="ck-section-header" style={{ marginBottom: '1.25rem' }}>
+              <h2 className="ck-section-title">📊 Production Order Summary</h2>
+              <button className="ck-btn-add" style={{ background: 'none', border: '1px solid var(--border)', color: 'var(--text-light)' }} onClick={fetchAll}>
+                ↻ Refresh
+              </button>
+            </div>
+
+            {ordersSummary.length === 0 ? (
+              <div className="ck-empty">No active orders from restaurants yet.</div>
+            ) : (
+              <>
+                {/* Summary stats row */}
+                <div className="ck-dash-stats">
+                  <div className="ck-stat-card">
+                    <div className="ck-stat-value">{ordersSummary.length}</div>
+                    <div className="ck-stat-label">Products Ordered</div>
+                  </div>
+                  <div className="ck-stat-card">
+                    <div className="ck-stat-value">{ordersSummary.reduce((s, p) => s + p.total_orders, 0)}</div>
+                    <div className="ck-stat-label">Total Order Lines</div>
+                  </div>
+                  <div className="ck-stat-card">
+                    <div className="ck-stat-value">₹{ordersSummary.reduce((s, p) => s + p.total_value, 0).toFixed(0)}</div>
+                    <div className="ck-stat-label">Total Order Value</div>
+                  </div>
+                </div>
+
+                {/* Per-product rows */}
+                <div className="ck-list">
+                  {ordersSummary.map(item => {
+                    const isExpanded = expandedProductId === item.product_id;
+                    return (
+                      <div key={item.product_id} className="ck-list-item" style={{ flexDirection: 'column', gap: '0.5rem' }}>
+                        {/* Product summary row */}
+                        <div style={{ display: 'flex', width: '100%', justifyContent: 'space-between', alignItems: 'center' }}>
+                          <div className="ck-list-item-main">
+                            <div className="ck-list-item-title">{item.product_name}</div>
+                            <div className="ck-list-item-meta">
+                              <span>From <strong>{item.total_orders}</strong> restaurant order{item.total_orders > 1 ? 's' : ''}</span>
+                              <span className="ck-urgent-badge" style={{ background: '#fff0f3', color: '#c0392b' }}>
+                                Total: <strong>{item.total_quantity} {item.unit_symbol}</strong> needed
+                              </span>
+                              <span style={{ color: 'var(--text-light)' }}>₹{item.total_value.toFixed(2)}</span>
+                            </div>
+                          </div>
+                          <button
+                            className="ck-btn-edit"
+                            style={{ flexShrink: 0 }}
+                            onClick={() => setExpandedProductId(isExpanded ? null : item.product_id)}
+                          >
+                            {isExpanded ? 'Hide Details ▲' : 'View Details ▼'}
+                          </button>
+                        </div>
+
+                        {/* Per-restaurant breakdown */}
+                        {isExpanded && (
+                          <div className="fade-in ck-dash-breakdown">
+                            <div className="ck-dash-breakdown-head">
+                              <span>Restaurant</span>
+                              <span>Order No.</span>
+                              <span>Delivery Date</span>
+                              <span>Qty</span>
+                              <span>Amount</span>
+                              <span>Status</span>
+                            </div>
+                            {item.restaurants.map((r, idx) => (
+                              <div key={idx} className="ck-dash-breakdown-row">
+                                <span>
+                                  <strong>{r.restaurant_name}</strong>
+                                  <span style={{ fontSize: '0.7rem', color: 'var(--text-light)', marginLeft: '0.25rem' }}>{r.branch_code}</span>
+                                  {r.is_urgent && <span className="ck-urgent-badge" style={{ marginLeft: '0.25rem', fontSize: '0.65rem' }}>Urgent ⚡</span>}
+                                </span>
+                                <span style={{ fontSize: '0.75rem', color: 'var(--text-light)' }}>{r.order_number}</span>
+                                <span>{new Date(r.delivery_date).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}</span>
+                                <span><strong>{r.quantity}</strong> {item.unit_symbol}</span>
+                                <span>₹{Number(r.total_price).toFixed(2)}</span>
+                                <span className={`ck-status-badge ck-status-badge--${r.status === 'SUBMITTED' || r.status === 'ACCEPTED' ? 'active' : 'inactive'}`}>
+                                  {r.status}
+                                </span>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </>
+            )}
+          </div>
+        )}
+
+        {/* Header row (only for non-dashboard tabs) */}
+        {section !== 'dashboard' && (
         <div className="ck-section-header">
           <h2 className="ck-section-title">
             {section === 'restaurants' ? 'Restaurants' : section === 'users' ? 'CK Users' : 'Products'}
@@ -242,6 +367,7 @@ export default function CentralKitchenHome() {
             </button>
           )}
         </div>
+        )}
 
         {/* ── FORM ── */}
         {showForm && (
