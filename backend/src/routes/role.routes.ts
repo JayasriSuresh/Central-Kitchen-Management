@@ -12,5 +12,6 @@ const router = Router();
 // router.put('/:id/permissions', ...);
 // router.get('/permissions', ...);
 // router.get('/permissions/check', ...);
+// roles
 
 export default router;
