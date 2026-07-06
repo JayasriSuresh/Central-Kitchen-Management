@@ -28,25 +28,45 @@ const createTransporter = (): Transporter<SentMessageInfo> => {
 const getFromAddress = () =>
   process.env.SMTP_FROM ?? '"Central Kitchen" <no-reply@centralkitchen.com>';
 
-/** Sends a 6-digit OTP email */
+type OtpPurpose = 'login' | 'email_verify' | 'password_reset' | 'verify_mobile';
+
+const otpMeta: Record<OtpPurpose, { subject: string; heading: string; label: string }> = {
+  login: {
+    subject: 'Your Central Kitchen login code',
+    heading: 'Sign in to Central Kitchen',
+    label: 'login',
+  },
+  email_verify: {
+    subject: 'Your Central Kitchen verification code',
+    heading: 'Verify your email address',
+    label: 'verification',
+  },
+  password_reset: {
+    subject: 'Your Central Kitchen password reset code',
+    heading: 'Reset your password',
+    label: 'reset',
+  },
+  verify_mobile: {
+    subject: 'Your Central Kitchen mobile verification code',
+    heading: 'Verify your mobile number',
+    label: 'verification',
+  },
+};
+
+/** Sends a 6-digit OTP email — supports all four OTP purposes */
 export const sendOtpEmail = async (
   to: string,
   otp: string,
-  purpose: 'email_verify' | 'password_reset',
+  purpose: OtpPurpose,
 ) => {
-  const subject =
-    purpose === 'email_verify'
-      ? 'Your Central Kitchen verification code'
-      : 'Your Central Kitchen password reset code';
+  const meta = otpMeta[purpose];
 
   const html = `
     <div style="font-family: Inter, Arial, sans-serif; max-width: 480px; margin: 0 auto; padding: 32px; background: #fafafa; border: 1px solid #dbdbdb; border-radius: 4px;">
       <h2 style="color: #262626; font-size: 20px; margin: 0 0 8px;">Central Kitchen 🍽</h2>
-      <p style="color: #737373; font-size: 14px; margin: 0 0 24px;">
-        ${purpose === 'email_verify' ? 'Verify your email address' : 'Reset your password'}
-      </p>
+      <p style="color: #737373; font-size: 14px; margin: 0 0 24px;">${meta.heading}</p>
       <div style="background: #fff; border: 1px solid #dbdbdb; border-radius: 4px; padding: 24px; text-align: center;">
-        <p style="color: #737373; font-size: 13px; margin: 0 0 12px;">Your ${purpose === 'email_verify' ? 'verification' : 'reset'} code is:</p>
+        <p style="color: #737373; font-size: 13px; margin: 0 0 12px;">Your ${meta.label} code is:</p>
         <div style="font-size: 36px; font-weight: 700; letter-spacing: 8px; color: #262626; margin: 0 0 12px;">${otp}</div>
         <p style="color: #a8a8a8; font-size: 12px; margin: 0;">This code expires in <strong>10 minutes</strong>.</p>
       </div>
@@ -56,16 +76,22 @@ export const sendOtpEmail = async (
 
   const transporter = createTransporter();
   console.log(`\n📧 Sending OTP email to ${to} via ${process.env.SMTP_HOST}...`);
+  console.log(`🔑 [DEBUG/FALLBACK] OTP code for ${to}: ${otp}`);
 
-  const info = await transporter.sendMail({
-    from: getFromAddress(),
-    to,
-    subject,
-    html,
-  });
-
-  console.log(`✅ OTP email sent successfully! Message ID: ${info.messageId}`);
-  return info;
+  try {
+    const info = await transporter.sendMail({
+      from: getFromAddress(),
+      to,
+      subject: meta.subject,
+      html,
+    });
+    console.log(`✅ OTP email sent successfully! Message ID: ${info.messageId}`);
+    return info;
+  } catch (error: any) {
+    console.error(`❌ SMTP delivery failed: ${error.message}`);
+    console.log(`ℹ️ OTP was generated and saved. You can use the code ${otp} to authenticate.`);
+    return null;
+  }
 };
 
 /** Sends a password reset link email */

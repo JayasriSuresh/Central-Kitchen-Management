@@ -24,7 +24,8 @@ export const authMiddleware = async (req: AuthRequest, res: Response, next: Next
     const user = await prisma.user.findUnique({
       where: { id: decoded.userId, deleted_at: null },
       include: {
-        role: {
+        // New schema: roles live on the User via primaryRole (the FK primary_role_id)
+        primaryRole: {
           include: {
             role_permissions: {
               include: { permission: true },
@@ -37,7 +38,7 @@ export const authMiddleware = async (req: AuthRequest, res: Response, next: Next
     if (!user) {
       return res.status(401).json({ message: 'Unauthorized: User not found' });
     }
-    
+
     if (user.status !== 'active') {
       return res.status(403).json({ message: 'Forbidden: User is inactive' });
     }

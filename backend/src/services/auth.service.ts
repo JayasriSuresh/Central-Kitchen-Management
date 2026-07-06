@@ -158,7 +158,7 @@ export const seedTenantRoles = async (tx: Prisma.TransactionClient, tenantId: nu
 //
 // Format: CCC RRR RR NNNN
 //   CCC  = tenant.ck_no          (e.g. 100 for first CK)
-//   RRR  = restaurant.restaurant_no per-tenant (e.g. 001), or 000 for CK-level
+//   RRR  = restaurant_tenant.restaurant_no per-tenant (e.g. 001), or 000 for CK-level
 //   RR   = role.code             (e.g. 01 = SUPER_ADMIN)
 //   NNNN = atomic per-bucket counter from UserCodeCounter table
 //
@@ -179,15 +179,16 @@ export const generateUserId = async (
   if (!tenant) throw new Error(`Tenant ${tenantId} not found`);
   const CCC = String(tenant.ck_no).padStart(3, '0');
 
-  // 2. RRR — from stored restaurant_no (per-tenant sequence), or 000 for CK-level users
+  // 2. RRR — from RestaurantTenant.restaurant_no (per-tenant sequence),
+  //           or 000 for CK-level users
   let RRR = '000';
   if (restaurantId) {
-    const restaurant = await tx.restaurant.findUnique({
-      where: { id: restaurantId },
+    const rt = await tx.restaurantTenant.findUnique({
+      where: { tenant_id_restaurant_id: { tenant_id: tenantId, restaurant_id: restaurantId } },
       select: { restaurant_no: true },
     });
-    if (!restaurant) throw new Error(`Restaurant ${restaurantId} not found`);
-    RRR = String(restaurant.restaurant_no).padStart(3, '0');
+    if (!rt) throw new Error(`RestaurantTenant for tenant=${tenantId} restaurant=${restaurantId} not found`);
+    RRR = String(rt.restaurant_no).padStart(3, '0');
   }
 
   // 3. RR — role code

@@ -94,7 +94,7 @@ async function main() {
     const user_id = `${CCC}${RRR}${RR}${NNNN}`;
     const username = user_id; // Set username equal to user_id
 
-    await prisma.user.create({
+    const user = await prisma.user.create({
       data: {
         tenant_id: tenant.id,
         user_id,
@@ -103,9 +103,16 @@ async function main() {
         email: ADMIN_EMAIL,
         mobile: ADMIN_MOBILE,
         password_hash: passwordHash,
-        role_id: superAdminRole.id,
+        primary_role_id: superAdminRole.id,
         email_verified: true,
         status: 'active',
+      },
+    });
+
+    await prisma.userRole.create({
+      data: {
+        user_id: user.id,
+        role_id: superAdminRole.id,
       },
     });
 
@@ -163,7 +170,7 @@ async function main() {
     const NNNN = '0001';
     const user_id = `${CCC}${RRR}${RR}${NNNN}`;
 
-    await prisma.user.create({
+    const user = await prisma.user.create({
       data: {
         tenant_id: tenant.id,
         user_id,
@@ -172,9 +179,16 @@ async function main() {
         email: jayEmail,
         mobile: '9000000002',
         password_hash: passwordHash,
-        role_id: managerRole.id,
+        primary_role_id: managerRole.id,
         email_verified: true,
         status: 'active',
+      },
+    });
+
+    await prisma.userRole.create({
+      data: {
+        user_id: user.id,
+        role_id: managerRole.id,
       },
     });
 

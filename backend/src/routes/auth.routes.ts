@@ -13,6 +13,8 @@ import {
   verifyOtp,
   forgotPassword,
   resetPasswordWithOtp,
+  loginOtpSend,
+  loginOtpVerify,
 } from '../controllers/auth.controller';
 import { authMiddleware } from '../middlewares/auth.middleware';
 
@@ -26,11 +28,15 @@ router.post('/signup', signup);
 router.post('/refresh-token', refreshToken);
 router.post('/logout', logout);
 
-// OTP
+// OTP utilities (email verify, password reset, mobile verify)
 router.post('/send-otp', sendOtp);
 router.post('/verify-otp', verifyOtp);
 router.post('/forgot-password', forgotPassword);
 router.post('/reset-password', resetPasswordWithOtp);
+
+// OTP Login (new feature — passwordless login flow)
+router.post('/login-otp/send', loginOtpSend);
+router.post('/login-otp/verify', loginOtpVerify);
 
 // Protected (require valid access token)
 router.post('/logout-all', authMiddleware, logoutAll);

@@ -22,6 +22,8 @@ import {
   sendOtpSchema,
   verifyOtpSchema,
   resetPasswordOtpSchema,
+  loginOtpSendSchema,
+  loginOtpVerifySchema,
 } from '../utils/validation';
 
 // ─── GET /auth/tenants ────────────────────────────────────────────────────────
@@ -81,8 +83,15 @@ export const login = async (req: Request, res: Response) => {
     });
 
     if (!user) {
+      // Avoid foreign key violation if tenant_id does not exist
+      const tenantExists = await prisma.tenant.findUnique({ where: { id: tenant_id } });
       await prisma.loginAttempt.create({
-        data: { email_or_mobile, success: false, ip_address: req.ip },
+        data: {
+          tenant_id: tenantExists ? tenant_id : null,
+          email_or_mobile,
+          success: false,
+          ip_address: req.ip
+        },
       });
       return res.status(401).json({ message: 'Invalid credentials' });
     }
@@ -103,7 +112,7 @@ export const login = async (req: Request, res: Response) => {
     if (!isMatch) {
       await Promise.all([
         prisma.loginAttempt.create({
-          data: { email_or_mobile, user_id: user.id, success: false, ip_address: req.ip },
+          data: { tenant_id, email_or_mobile, user_id: user.id, success: false, ip_address: req.ip },
         }),
         recordFailedLogin(user.id),
       ]);
@@ -114,7 +123,7 @@ export const login = async (req: Request, res: Response) => {
     await Promise.all([
       clearFailedLogins(user.id),
       prisma.loginAttempt.create({
-        data: { email_or_mobile, user_id: user.id, success: true, ip_address: req.ip },
+        data: { tenant_id, email_or_mobile, user_id: user.id, success: true, ip_address: req.ip },
       }),
       prisma.user.update({
         where: { id: user.id },
@@ -137,7 +146,7 @@ export const login = async (req: Request, res: Response) => {
         username: user.username,
         name: user.name,
         email: user.email,
-        role_id: user.role_id,
+        primary_role_id: user.primary_role_id,
         tenant_id: user.tenant_id,
       },
       ...tokens,
@@ -187,8 +196,14 @@ export const signup = async (req: Request, res: Response) => {
           email,
           mobile,
           password_hash: hashedPassword,
-          role_id: superAdminRole.id,
+          // New schema field: primary_role_id (replaces role_id)
+          primary_role_id: superAdminRole.id,
         },
+      });
+
+      // Also create the UserRole junction record (new schema requirement)
+      await tx.userRole.create({
+        data: { user_id: user.id, role_id: superAdminRole.id },
       });
 
       return { tenant, user };
@@ -342,7 +357,7 @@ export const sendOtp = async (req: Request, res: Response) => {
       await prisma.otpCode.create({
         data: { user_id: user.id, code: otp, purpose, expires_at: new Date(Date.now() + OTP_TTL_MS) },
       });
-      await sendOtpEmail(user.email, otp, purpose);
+      await sendOtpEmail(user.email, otp, purpose as any);
     }
 
     // Always same response to prevent user enumeration
@@ -428,6 +443,154 @@ export const resetPasswordWithOtp = async (req: Request, res: Response) => {
     ]);
 
     return res.status(200).json({ message: 'Password reset successfully. You can now log in.' });
+  } catch (error: any) {
+    return res.status(400).json({ message: error.message });
+  }
+};
+
+// ─── POST /auth/login-otp/send ────────────────────────────────────────────────
+// Step 1 of OTP-based login: validate the user exists, generate a 'login' OTP,
+// and send it to their email. Does NOT return any user info (prevents enumeration).
+
+export const loginOtpSend = async (req: Request, res: Response) => {
+  try {
+    const { tenant_id, email_or_mobile } = loginOtpSendSchema.parse(req.body);
+    const user = await findUserByIdentifier(tenant_id, email_or_mobile);
+
+    if (user) {
+      // Check if account is locked / inactive before sending
+      if (user.locked_until && user.locked_until > new Date()) {
+        const minutesLeft = Math.ceil((user.locked_until.getTime() - Date.now()) / 60000);
+        return res.status(403).json({
+          message: `Account locked. Try again in ${minutesLeft} minute(s).`,
+        });
+      }
+
+      if (user.status !== 'active') {
+        return res.status(403).json({ message: 'User account is inactive.' });
+      }
+
+      // Invalidate any previous unused login OTPs for this user
+      await prisma.otpCode.updateMany({
+        where: { user_id: user.id, purpose: 'login', verified_at: null },
+        data: { verified_at: new Date() },
+      });
+
+      const otp = generateOtp();
+      await prisma.otpCode.create({
+        data: {
+          user_id: user.id,
+          code: otp,
+          purpose: 'login',
+          expires_at: new Date(Date.now() + OTP_TTL_MS),
+        },
+      });
+
+      await sendOtpEmail(user.email, otp, 'login');
+    }
+
+    // Always same response regardless of whether user was found
+    return res.status(200).json({ message: 'If that account exists, a login code has been sent.' });
+  } catch (error: any) {
+    return res.status(400).json({ message: error.message });
+  }
+};
+
+// ─── POST /auth/login-otp/verify ─────────────────────────────────────────────
+// Step 2 of OTP-based login: verify the 'login' OTP and, on success,
+// return a full session (access + refresh tokens) — same shape as /auth/login.
+
+export const loginOtpVerify = async (req: Request, res: Response) => {
+  try {
+    const { tenant_id, email_or_mobile, otp } = loginOtpVerifySchema.parse(req.body);
+    const user = await findUserByIdentifier(tenant_id, email_or_mobile);
+
+    if (!user) {
+      return res.status(401).json({ message: 'Invalid or expired login code.' });
+    }
+
+    // Re-check account status
+    if (user.locked_until && user.locked_until > new Date()) {
+      const minutesLeft = Math.ceil((user.locked_until.getTime() - Date.now()) / 60000);
+      return res.status(403).json({
+        message: `Account locked. Try again in ${minutesLeft} minute(s).`,
+      });
+    }
+
+    if (user.status !== 'active') {
+      return res.status(403).json({ message: 'User account is inactive.' });
+    }
+
+    const record = await prisma.otpCode.findFirst({
+      where: {
+        user_id: user.id,
+        code: otp,
+        purpose: 'login',
+        verified_at: null,
+        expires_at: { gt: new Date() },
+      },
+      orderBy: { id: 'desc' },
+    });
+
+    if (!record) {
+      // Record the failed attempt toward lockout
+      await Promise.all([
+        prisma.loginAttempt.create({
+          data: {
+            tenant_id,
+            email_or_mobile,
+            user_id: user.id,
+            success: false,
+            failure_reason: 'invalid_otp',
+            ip_address: req.ip,
+          },
+        }),
+        recordFailedLogin(user.id),
+      ]);
+      return res.status(401).json({ message: 'Invalid or expired login code.' });
+    }
+
+    // Mark the OTP as used
+    await prisma.otpCode.update({ where: { id: record.id }, data: { verified_at: new Date() } });
+
+    // Success — clear lockout counters, update last_login
+    await Promise.all([
+      clearFailedLogins(user.id),
+      prisma.loginAttempt.create({
+        data: {
+          tenant_id,
+          email_or_mobile,
+          user_id: user.id,
+          success: true,
+          ip_address: req.ip,
+        },
+      }),
+      prisma.user.update({
+        where: { id: user.id },
+        data: { last_login_at: new Date() },
+      }),
+    ]);
+
+    const tokens = await generateTokens(
+      user.id,
+      tenant_id,
+      req.headers['user-agent'],
+      req.ip,
+      'Web Browser',
+    );
+
+    return res.status(200).json({
+      user: {
+        id: user.id,
+        user_id: user.user_id,
+        username: user.username,
+        name: user.name,
+        email: user.email,
+        primary_role_id: user.primary_role_id,
+        tenant_id: user.tenant_id,
+      },
+      ...tokens,
+    });
   } catch (error: any) {
     return res.status(400).json({ message: error.message });
   }

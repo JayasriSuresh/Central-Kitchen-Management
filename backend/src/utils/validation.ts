@@ -33,18 +33,20 @@ export const resetPasswordSchema = z.object({
   new_password: z.string().min(6, 'Password must be at least 6 characters'),
 });
 
+// All valid OTP purposes (mirrors OtpCode.purpose in schema)
+const otpPurpose = z.enum(['login', 'email_verify', 'password_reset', 'verify_mobile']);
+
 export const sendOtpSchema = z.object({
   tenant_id: z.coerce.number(),
   email_or_mobile: z.string().min(1, 'Email or Mobile is required'),
-  // 'email_verify' = verify after signup; 'password_reset' = forgot-password OTP
-  purpose: z.enum(['email_verify', 'password_reset']),
+  purpose: otpPurpose,
 });
 
 export const verifyOtpSchema = z.object({
   tenant_id: z.coerce.number(),
   email_or_mobile: z.string().min(1, 'Email or Mobile is required'),
   otp: z.string().length(6, 'OTP must be 6 digits'),
-  purpose: z.enum(['email_verify', 'password_reset']),
+  purpose: otpPurpose,
 });
 
 // Used to verify the OTP and set the new password in one step
@@ -53,4 +55,19 @@ export const resetPasswordOtpSchema = z.object({
   email_or_mobile: z.string().min(1, 'Email or Mobile is required'),
   otp: z.string().length(6, 'OTP must be 6 digits'),
   new_password: z.string().min(6, 'Password must be at least 6 characters'),
+});
+
+// ─── OTP Login (new feature) ──────────────────────────────────────────────────
+
+/** Step 1: request an OTP for login */
+export const loginOtpSendSchema = z.object({
+  tenant_id: z.coerce.number(),
+  email_or_mobile: z.string().min(1, 'Email or Mobile is required'),
+});
+
+/** Step 2: verify the OTP and receive tokens */
+export const loginOtpVerifySchema = z.object({
+  tenant_id: z.coerce.number(),
+  email_or_mobile: z.string().min(1, 'Email or Mobile is required'),
+  otp: z.string().length(6, 'OTP must be 6 digits'),
 });

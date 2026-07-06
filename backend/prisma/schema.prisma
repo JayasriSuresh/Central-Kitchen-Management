@@ -7,19 +7,34 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+// ============================================================
+// MODULE 1 — TENANCY, AUTH, RBAC
+// ============================================================
+
 model Tenant {
   id         Int      @id @default(autoincrement())
-  ck_no      Int      @unique              // NEW: independent sequence, starts at 100
+  ck_no      Int      @unique
   name       String
   code       String   @unique
+  address    String?
   status     String   @default("active")
   created_at DateTime @default(now())
   updated_at DateTime @updatedAt
 
-  roles       Role[]
-  users       User[]
-  restaurants Restaurant[]
-  code_counters UserCodeCounter[]           // NEW
+  roles              Role[]
+  users              User[]
+  restaurant_tenants RestaurantTenant[]
+  code_counters      UserCodeCounter[]
+  products           Product[]
+  raw_materials      RawMaterial[]
+  product_categories ProductCategory[]
+  vendors            Vendor[]
+  delivery_routes    DeliveryRoute[]
+  production_plans   ProductionPlan[]
+  audit_logs         AuditLog[]
+  notifications      Notification[]
+  attachments        Attachment[]
+  login_attempts     LoginAttempt[]
 
   @@map("tenants")
 }
@@ -31,13 +46,15 @@ model Role {
   code           String
   type           String    @default("central_kitchen")
   is_system_role Boolean   @default(false)
+  is_super_admin Boolean   @default(false)
   created_at     DateTime  @default(now())
   deleted_at     DateTime?
 
-  tenant           Tenant?          @relation(fields: [tenant_id], references: [id])
-  users            User[]
-  role_permissions RolePermission[]
-  restaurant_users RestaurantUser[]
+  tenant                Tenant?              @relation(fields: [tenant_id], references: [id])
+  role_permissions      RolePermission[]
+  user_roles            UserRole[]
+  primary_users         User[]               @relation("PrimaryRole")
+  restaurant_user_roles RestaurantUserRole[]
 
   @@unique([tenant_id, name])
   @@unique([tenant_id, code])
@@ -56,7 +73,7 @@ model Permission {
 }
 
 model RolePermission {
-  id            Int    @id @default(autoincrement())
+  id            Int @id @default(autoincrement())
   role_id       Int
   permission_id Int
 
@@ -67,22 +84,34 @@ model RolePermission {
   @@map("role_permissions")
 }
 
+model UserRole {
+  id      Int @id @default(autoincrement())
+  user_id Int
+  role_id Int
+
+  user User @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  role Role @relation(fields: [role_id], references: [id], onDelete: Cascade)
+
+  @@unique([user_id, role_id])
+  @@map("user_roles")
+}
+
 model User {
   id                 Int       @id @default(autoincrement())
   user_id            String    @unique
   tenant_id          Int
   restaurant_id      Int?
   name               String
-  username           String                          // NEW
+  username           String
   email              String
   mobile             String
   password_hash      String
-  role_id            Int
+  primary_role_id    Int
   email_verified     Boolean   @default(false)
   mobile_verified    Boolean   @default(false)
   status             String    @default("active")
-  failed_login_count Int       @default(0)            // NEW
-  locked_until       DateTime?                          // NEW
+  failed_login_count Int       @default(0)
+  locked_until       DateTime?
   last_login_at      DateTime?
   created_by         String?
   updated_by         String?
@@ -90,61 +119,51 @@ model User {
   updated_at         DateTime  @updatedAt
   deleted_at         DateTime?
 
-  tenant                Tenant               @relation(fields: [tenant_id], references: [id])
-  role                  Role                 @relation(fields: [role_id], references: [id])
-  restaurant             Restaurant?         @relation(fields: [restaurant_id], references: [id])
-  restaurant_users      RestaurantUser[]
-  password_reset_tokens PasswordResetToken[]
-  otp_codes             OtpCode[]
-  login_attempts        LoginAttempt[]
-  refresh_tokens        RefreshToken[]
+  tenant           Tenant            @relation(fields: [tenant_id], references: [id])
+  primaryRole      Role              @relation("PrimaryRole", fields: [primary_role_id], references: [id])
+  restaurantTenant RestaurantTenant? @relation(fields: [tenant_id, restaurant_id], references: [tenant_id, restaurant_id])
 
-  @@unique([tenant_id, username])                     // NEW
+  user_roles             UserRole[]
+  restaurant_user_roles  RestaurantUserRole[]
+  password_reset_tokens  PasswordResetToken[]
+  otp_codes              OtpCode[]
+  login_attempts         LoginAttempt[]
+  refresh_tokens         RefreshToken[]
+  device_sessions        DeviceSession[]
+
+  // reverse relations used as created_by/approved_by style actors across modules
+  recipes_created        Recipe[]              @relation("RecipeCreatedBy")
+  recipes_approved       Recipe[]               @relation("RecipeApprovedBy")
+  production_plans_created  ProductionPlan[]    @relation("PlanCreatedBy")
+  production_plans_approved ProductionPlan[]    @relation("PlanApprovedBy")
+  purchase_orders_created PurchaseOrder[]       @relation("POCreatedBy")
+  purchase_orders_approved PurchaseOrder[]      @relation("POApprovedBy")
+  goods_received_by      GoodsReceivedNote[]
+  vendor_invoices_created VendorInvoice[]
+  vendor_payments_recorded VendorPayment[]
+  invoices_created        Invoice[]
+  payments_recorded        Payment[]
+  audit_log_entries        AuditLog[]
+  attachments_uploaded     Attachment[]
+  dispatches_driven        Dispatch[]
+
+  @@unique([tenant_id, username])
   @@unique([tenant_id, email])
   @@unique([tenant_id, mobile])
   @@map("users")
 }
 
 model UserCodeCounter {
-  id             Int  @id @default(autoincrement())
-  tenant_id      Int
-  restaurant_id  Int?
-  role_code      String
-  last_sequence  Int  @default(0)
+  id            Int  @id @default(autoincrement())
+  tenant_id     Int
+  restaurant_id Int?
+  role_code     String
+  last_sequence Int  @default(0)
 
   tenant Tenant @relation(fields: [tenant_id], references: [id])
 
   @@unique([tenant_id, restaurant_id, role_code])
   @@map("user_code_counters")
-}
-
-model Restaurant {
-  id             Int      @id @default(autoincrement())
-  tenant_id      Int
-  restaurant_no  Int                        // NEW: independent sequence, starts at 001 PER TENANT
-  name           String
-  created_at     DateTime @default(now())
-
-  tenant           Tenant           @relation(fields: [tenant_id], references: [id])
-  restaurant_users RestaurantUser[]
-  users            User[]
-
-  @@unique([tenant_id, restaurant_no])      // NEW: uniqueness is per-tenant, not global
-  @@map("restaurants")
-}
-
-model RestaurantUser {
-  id            Int     @id @default(autoincrement())
-  restaurant_id Int
-  user_id       Int
-  role_id       Int?
-
-  restaurant Restaurant @relation(fields: [restaurant_id], references: [id], onDelete: Cascade)
-  user       User       @relation(fields: [user_id], references: [id], onDelete: Cascade)
-  role       Role?      @relation(fields: [role_id], references: [id])
-
-  @@unique([restaurant_id, user_id])
-  @@map("restaurant_users")
 }
 
 model PasswordResetToken {
@@ -163,9 +182,10 @@ model OtpCode {
   id          Int       @id @default(autoincrement())
   user_id     Int
   code        String
-  purpose     String
+  purpose     String    // login | email_verify | password_reset | verify_mobile
   expires_at  DateTime
   verified_at DateTime?
+  created_at  DateTime  @default(now())
 
   user User @relation(fields: [user_id], references: [id], onDelete: Cascade)
 
@@ -174,23 +194,28 @@ model OtpCode {
 
 model LoginAttempt {
   id              Int      @id @default(autoincrement())
+  tenant_id       Int?
   email_or_mobile String
   user_id         Int?
   ip_address      String?
   success         Boolean
+  failure_reason  String?
   attempted_at    DateTime @default(now())
 
-  user User? @relation(fields: [user_id], references: [id], onDelete: SetNull)
+  tenant Tenant? @relation(fields: [tenant_id], references: [id])
+  user   User?   @relation(fields: [user_id], references: [id], onDelete: SetNull)
 
+  @@index([tenant_id, email_or_mobile, attempted_at])
   @@map("login_attempts")
 }
 
 model RefreshToken {
   id         Int       @id @default(autoincrement())
   user_id    Int
-  token      String
+  token      String    @unique @db.VarChar(500)
   expires_at DateTime
   revoked_at DateTime?
+  created_at DateTime  @default(now())
 
   user            User            @relation(fields: [user_id], references: [id], onDelete: Cascade)
   device_sessions DeviceSession[]
@@ -209,7 +234,791 @@ model DeviceSession {
   revoked_at       DateTime?
   created_at       DateTime  @default(now())
 
+  user          User         @relation(fields: [user_id], references: [id], onDelete: Cascade)
   refresh_token RefreshToken @relation(fields: [refresh_token_id], references: [id], onDelete: Cascade)
 
   @@map("device_sessions")
+}
+
+// ============================================================
+// MODULE 2 — RESTAURANTS (now tenant-independent — one
+// restaurant can belong to multiple Central Kitchens)
+// ============================================================
+
+model Restaurant {
+  id         Int       @id @default(autoincrement())
+  name       String
+  address    String?
+  gst_number String?
+  status     String    @default("active")
+  created_at DateTime  @default(now())
+  deleted_at DateTime?
+
+  restaurant_tenants RestaurantTenant[]
+
+  @@map("restaurants")
+}
+
+model DeliveryRoute {
+  id                  Int       @id @default(autoincrement())
+  tenant_id           Int
+  route_name          String
+  area_covered        String?
+  assigned_driver_id  Int?
+  deleted_at          DateTime?
+
+  tenant             Tenant             @relation(fields: [tenant_id], references: [id])
+  restaurant_tenants RestaurantTenant[]
+  dispatches         Dispatch[]
+
+  @@map("delivery_routes")
+}
+
+// Junction: restaurant <-> CK tenant. All CK-relationship-specific
+// data (numbering, branch code, credit terms) lives here.
+model RestaurantTenant {
+  id                Int      @id @default(autoincrement())
+  tenant_id         Int
+  restaurant_id     Int
+  restaurant_no     Int
+  branch_code       String
+  contact_number    String?
+  credit_limit      Decimal? @db.Decimal(12, 2)
+  payment_terms     String?
+  delivery_route_id Int?
+  timezone          String   @default("Asia/Kolkata")
+  latitude          Decimal? @db.Decimal(10, 6)
+  longitude         Decimal? @db.Decimal(10, 6)
+  status            String   @default("active")
+  created_by        String?
+  updated_by        String?
+  deleted_at        DateTime?
+  created_at        DateTime @default(now())
+  updated_at        DateTime @updatedAt
+
+  tenant        Tenant         @relation(fields: [tenant_id], references: [id])
+  restaurant    Restaurant     @relation(fields: [restaurant_id], references: [id])
+  deliveryRoute DeliveryRoute? @relation(fields: [delivery_route_id], references: [id])
+
+  users                 User[]
+  restaurant_user_roles RestaurantUserRole[]
+  orders                RestaurantOrder[]
+  invoices              Invoice[]
+
+  @@unique([tenant_id, restaurant_id])
+  @@unique([tenant_id, restaurant_no])
+  @@unique([tenant_id, branch_code])
+  @@map("restaurant_tenants")
+}
+
+// Supports multi-role-per-branch (one user can hold several roles
+// at the same restaurant, e.g. Manager + Billing Approver)
+model RestaurantUserRole {
+  id                   Int @id @default(autoincrement())
+  restaurant_tenant_id Int
+  user_id              Int
+  role_id              Int
+
+  restaurantTenant RestaurantTenant @relation(fields: [restaurant_tenant_id], references: [id], onDelete: Cascade)
+  user             User             @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  role             Role             @relation(fields: [role_id], references: [id])
+
+  @@unique([restaurant_tenant_id, user_id, role_id])
+  @@map("restaurant_user_roles")
+}
+
+// ============================================================
+// MODULE 3 — PRODUCTS (cutoff, lead time, urgent-eligibility)
+// ============================================================
+
+model ProductCategory {
+  id        Int    @id @default(autoincrement())
+  tenant_id Int
+  name      String
+
+  tenant   Tenant    @relation(fields: [tenant_id], references: [id])
+  products Product[]
+
+  @@unique([tenant_id, name])
+  @@map("product_categories")
+}
+
+model Unit {
+  id     Int    @id @default(autoincrement())
+  name   String
+  symbol String
+
+  products      Product[]
+  raw_materials RawMaterial[]
+  recipe_ingredients RecipeIngredient[]
+
+  @@map("units")
+}
+
+model Product {
+  id                 Int       @id @default(autoincrement())
+  tenant_id          Int
+  product_name       String
+  code               String
+  sku                String?
+  category_id        Int?
+  unit_id            Int?
+  moq                Decimal?  @db.Decimal(10, 2)
+  batch_size         Decimal?  @db.Decimal(10, 2)
+  selling_price      Decimal   @db.Decimal(10, 2)
+  tax_percent        Decimal   @default(0) @db.Decimal(5, 2)
+  shelf_life_days    Int?
+  order_cutoff_hours Int       @default(0)   // hours before delivery that ordering/editing locks
+  lead_time_days     Int       @default(0)   // minimum prep days required before delivery
+  allow_urgent_order Boolean   @default(true)
+  status             String    @default("active")
+  created_by         String?
+  updated_by         String?
+  created_at         DateTime  @default(now())
+  updated_at         DateTime  @updatedAt
+  deleted_at         DateTime?
+
+  tenant   Tenant           @relation(fields: [tenant_id], references: [id])
+  category ProductCategory? @relation(fields: [category_id], references: [id])
+  unit     Unit?            @relation(fields: [unit_id], references: [id])
+
+  prices               ProductPrice[]
+  recipes              Recipe[]
+  order_items          RestaurantOrderItem[]
+  production_plan_items ProductionPlanItem[]
+  stock_transactions    StockTransaction[]
+  stock_daily_summary   StockDailySummary[]
+  stock_alerts          StockAlert[]
+  dispatch_items        DispatchItem[]
+
+  @@unique([tenant_id, code])
+  @@map("products")
+}
+
+model ProductPrice {
+  id             Int       @id @default(autoincrement())
+  tenant_id      Int
+  product_id     Int
+  price          Decimal   @db.Decimal(10, 2)
+  effective_from DateTime
+  effective_to   DateTime?
+  created_by     String?
+  created_at     DateTime  @default(now())
+
+  product Product @relation(fields: [product_id], references: [id])
+
+  @@unique([product_id, effective_from])
+  @@map("product_prices")
+}
+
+// ============================================================
+// MODULE 4 — RECIPES (CK-editable, versioned)
+// ============================================================
+
+model RawMaterial {
+  id             Int       @id @default(autoincrement())
+  tenant_id      Int
+  name           String
+  unit_id        Int?
+  category       String?
+  reorder_level  Decimal?  @db.Decimal(10, 2)
+  status         String    @default("active")
+  deleted_at     DateTime?
+
+  tenant Tenant @relation(fields: [tenant_id], references: [id])
+  unit   Unit?  @relation(fields: [unit_id], references: [id])
+
+  recipe_ingredients          RecipeIngredient[]
+  stock_transactions          StockTransaction[]
+  stock_daily_summary         StockDailySummary[]
+  stock_alerts                StockAlert[]
+  raw_material_requirements   RawMaterialRequirement[]
+  purchase_order_items        PurchaseOrderItem[]
+
+  @@map("raw_materials")
+}
+
+model Recipe {
+  id              Int       @id @default(autoincrement())
+  tenant_id       Int
+  product_id      Int
+  version_no      Int
+  base_quantity   Decimal   @db.Decimal(10, 2)
+  yield_percent   Decimal?  @db.Decimal(5, 2)
+  wastage_percent Decimal?  @db.Decimal(5, 2)
+  is_active       Boolean   @default(false)
+  created_by_id   Int?
+  approved_by_id  Int?
+  created_at      DateTime  @default(now())
+  updated_at      DateTime  @updatedAt
+
+  product    Product @relation(fields: [product_id], references: [id])
+  createdBy  User?   @relation("RecipeCreatedBy", fields: [created_by_id], references: [id])
+  approvedBy User?   @relation("RecipeApprovedBy", fields: [approved_by_id], references: [id])
+
+  ingredients RecipeIngredient[]
+
+  @@unique([product_id, version_no])
+  @@map("recipes")
+}
+
+model RecipeIngredient {
+  id               Int     @id @default(autoincrement())
+  recipe_id        Int
+  raw_material_id  Int
+  quantity         Decimal @db.Decimal(10, 2)
+  unit_id          Int?
+
+  recipe      Recipe      @relation(fields: [recipe_id], references: [id])
+  rawMaterial RawMaterial @relation(fields: [raw_material_id], references: [id])
+  unit        Unit?       @relation(fields: [unit_id], references: [id])
+
+  @@unique([recipe_id, raw_material_id])
+  @@map("recipe_ingredients")
+}
+
+// ============================================================
+// MODULE 5 — ORDERS (urgent flag, cutoff snapshot, partial
+// dispatch tracking)
+// ============================================================
+
+model RestaurantOrder {
+  id                   Int       @id @default(autoincrement())
+  tenant_id            Int
+  order_number         String
+  restaurant_tenant_id Int
+  delivery_date        DateTime
+  status               String    // DRAFT, SUBMITTED, ACCEPTED, MODIFIED, IN_PRODUCTION,
+                                  // READY, PARTIALLY_DISPATCHED, DISPATCHED, DELIVERED, CANCELLED
+  is_urgent            Boolean   @default(false)
+  urgent_approved_by   String?
+  urgent_approved_at   DateTime?
+  order_source         String    @default("web")
+  remarks              String?
+  created_by           String?
+  deleted_at           DateTime?
+  created_at           DateTime  @default(now())
+  updated_at           DateTime  @updatedAt
+
+  restaurantTenant RestaurantTenant @relation(fields: [restaurant_tenant_id], references: [id])
+
+  items          RestaurantOrderItem[]
+  dispatchOrders DispatchOrder[]
+  invoiceOrders  InvoiceOrder[]
+
+  @@unique([tenant_id, order_number])
+  @@map("restaurant_orders")
+}
+
+model RestaurantOrderItem {
+  id             Int      @id @default(autoincrement())
+  order_id       Int
+  product_id     Int
+  quantity       Decimal  @db.Decimal(10, 2)
+  unit_price     Decimal  @db.Decimal(10, 2)     // snapshot at order time
+  total_price    Decimal  @db.Decimal(10, 2)
+  edit_cutoff_at DateTime                        // snapshot: delivery_date minus product.order_cutoff_hours
+  dispatched_qty Decimal  @default(0) @db.Decimal(10, 2)
+
+  order   RestaurantOrder @relation(fields: [order_id], references: [id])
+  product Product         @relation(fields: [product_id], references: [id])
+
+  dispatchItems DispatchItem[]
+
+  @@unique([order_id, product_id])
+  @@map("restaurant_order_items")
+}
+
+// Order revision history: tracked via audit_logs (old/new value JSON)
+
+// ============================================================
+// MODULE 7 — INVENTORY (ledger-first, polymorphic split)
+// ============================================================
+
+model StockTransaction {
+  id               Int      @id @default(autoincrement())
+  tenant_id        Int
+  product_id       Int?
+  raw_material_id  Int?
+  transaction_type String   // inward, outward, wastage, adjustment, production_consumption, production_output
+  quantity         Decimal  @db.Decimal(10, 2)
+  reference_type   String?
+  reference_id     Int?
+  remarks          String?
+  created_by       String?
+  created_at       DateTime @default(now())
+
+  product     Product?     @relation(fields: [product_id], references: [id])
+  rawMaterial RawMaterial? @relation(fields: [raw_material_id], references: [id])
+
+  @@index([tenant_id, product_id, raw_material_id, created_at])
+  @@map("stock_transactions")
+}
+
+model StockDailySummary {
+  id              Int      @id @default(autoincrement())
+  tenant_id       Int
+  product_id      Int?
+  raw_material_id Int?
+  date            DateTime
+  opening_stock   Decimal  @default(0) @db.Decimal(10, 2)
+  inward_qty      Decimal  @default(0) @db.Decimal(10, 2)
+  outward_qty     Decimal  @default(0) @db.Decimal(10, 2)
+  wastage_qty     Decimal  @default(0) @db.Decimal(10, 2)
+  closing_stock   Decimal  @default(0) @db.Decimal(10, 2)
+  generated_at    DateTime @default(now())
+
+  product     Product?     @relation(fields: [product_id], references: [id])
+  rawMaterial RawMaterial? @relation(fields: [raw_material_id], references: [id])
+
+  @@unique([tenant_id, product_id, raw_material_id, date])
+  @@map("stock_daily_summary")
+}
+
+model StockAlert {
+  id              Int       @id @default(autoincrement())
+  tenant_id       Int
+  product_id      Int?
+  raw_material_id Int?
+  alert_type      String    // low_stock, expiry
+  threshold       Decimal?  @db.Decimal(10, 2)
+  triggered_at    DateTime  @default(now())
+  resolved_at     DateTime?
+
+  product     Product?     @relation(fields: [product_id], references: [id])
+  rawMaterial RawMaterial? @relation(fields: [raw_material_id], references: [id])
+
+  @@map("stock_alerts")
+}
+
+// ============================================================
+// MODULE 8 — PRODUCTION PLANNING
+// ============================================================
+
+model ProductionPlan {
+  id             Int      @id @default(autoincrement())
+  tenant_id      Int
+  plan_date      DateTime
+  status         String   @default("draft") // draft, approved, in_progress, completed
+  approved_by_id Int?
+  created_by_id  Int?
+  created_at     DateTime @default(now())
+  updated_at     DateTime @updatedAt
+
+  tenant     Tenant @relation(fields: [tenant_id], references: [id])
+  createdBy  User?  @relation("PlanCreatedBy", fields: [created_by_id], references: [id])
+  approvedBy User?  @relation("PlanApprovedBy", fields: [approved_by_id], references: [id])
+
+  items        ProductionPlanItem[]
+  requirements RawMaterialRequirement[]
+
+  @@map("production_plans")
+}
+
+model ProductionPlanItem {
+  id                Int     @id @default(autoincrement())
+  plan_id           Int
+  product_id        Int
+  total_orders_qty  Decimal @db.Decimal(10, 2)
+  buffer_qty        Decimal @default(0) @db.Decimal(10, 2)
+  current_stock_qty Decimal @default(0) @db.Decimal(10, 2)
+  production_qty    Decimal @db.Decimal(10, 2)
+  batch_no          String?
+  status            String  @default("pending") // pending, completed
+
+  plan    ProductionPlan @relation(fields: [plan_id], references: [id])
+  product Product        @relation(fields: [product_id], references: [id])
+
+  @@unique([plan_id, product_id])
+  @@map("production_plan_items")
+}
+
+// ============================================================
+// MODULE 9 — RAW MATERIAL REQUIREMENTS
+// ============================================================
+
+model RawMaterialRequirement {
+  id                  Int      @id @default(autoincrement())
+  tenant_id           Int
+  production_plan_id  Int
+  raw_material_id     Int
+  required_qty        Decimal  @db.Decimal(10, 2)
+  available_qty       Decimal  @default(0) @db.Decimal(10, 2)
+  purchase_needed_qty Decimal  @default(0) @db.Decimal(10, 2)
+  created_at          DateTime @default(now())
+
+  plan        ProductionPlan @relation(fields: [production_plan_id], references: [id])
+  rawMaterial RawMaterial    @relation(fields: [raw_material_id], references: [id])
+
+  purchase_requests PurchaseRequest[]
+
+  @@unique([production_plan_id, raw_material_id])
+  @@map("raw_material_requirements")
+}
+
+// ============================================================
+// MODULE 10 — VENDORS & PURCHASING (incl. vendor billing)
+// ============================================================
+
+model Vendor {
+  id             Int       @id @default(autoincrement())
+  tenant_id      Int
+  name           String
+  contact_number String?
+  gst_number     String?
+  payment_terms  String?
+  address        String?
+  rating         Decimal?  @db.Decimal(3, 2)
+  status         String    @default("active")
+  deleted_at     DateTime?
+
+  tenant          Tenant           @relation(fields: [tenant_id], references: [id])
+  purchase_orders PurchaseOrder[]
+  vendor_invoices VendorInvoice[]
+
+  @@map("vendors")
+}
+
+model PurchaseRequest {
+  id                            Int      @id @default(autoincrement())
+  tenant_id                     Int
+  request_number                String
+  raw_material_requirement_id   Int
+  requested_by                  String?
+  status                        String   @default("pending") // pending, approved, rejected
+  created_at                    DateTime @default(now())
+
+  requirement   RawMaterialRequirement @relation(fields: [raw_material_requirement_id], references: [id])
+  purchaseOrders PurchaseOrder[]
+
+  @@unique([tenant_id, request_number])
+  @@map("purchase_requests")
+}
+
+model PurchaseOrder {
+  id                      Int       @id @default(autoincrement())
+  tenant_id               Int
+  po_number               String
+  vendor_id               Int
+  purchase_request_id     Int?
+  status                  String    @default("created") // created, sent, partially_received, received, cancelled
+  expected_delivery_date  DateTime?
+  total_amount            Decimal   @default(0) @db.Decimal(12, 2)
+  created_by_id           Int?
+  updated_by_id           Int?
+  approved_by_id          Int?
+  created_at              DateTime  @default(now())
+  updated_at               DateTime  @updatedAt
+
+  vendor          Vendor           @relation(fields: [vendor_id], references: [id])
+  purchaseRequest PurchaseRequest? @relation(fields: [purchase_request_id], references: [id])
+  createdBy       User?            @relation("POCreatedBy", fields: [created_by_id], references: [id])
+  approvedBy      User?            @relation("POApprovedBy", fields: [approved_by_id], references: [id])
+
+  items                PurchaseOrderItem[]
+  goods_received_notes GoodsReceivedNote[]
+  vendor_invoices      VendorInvoice[]
+
+  @@unique([tenant_id, po_number])
+  @@map("purchase_orders")
+}
+
+model PurchaseOrderItem {
+  id              Int      @id @default(autoincrement())
+  po_id           Int
+  raw_material_id Int
+  ordered_qty     Decimal  @db.Decimal(10, 2)
+  received_qty    Decimal  @default(0) @db.Decimal(10, 2)
+  unit_price      Decimal  @db.Decimal(10, 2)
+  total_price     Decimal  @db.Decimal(10, 2)
+  created_by      String?
+  updated_by      String?
+
+  purchaseOrder PurchaseOrder @relation(fields: [po_id], references: [id])
+  rawMaterial   RawMaterial   @relation(fields: [raw_material_id], references: [id])
+
+  @@unique([po_id, raw_material_id])
+  @@map("purchase_order_items")
+}
+
+model GoodsReceivedNote {
+  id             Int      @id @default(autoincrement())
+  tenant_id      Int
+  po_id          Int
+  received_date  DateTime
+  received_by_id Int?
+  notes          String?
+
+  purchaseOrder PurchaseOrder @relation(fields: [po_id], references: [id])
+  receivedBy    User?         @relation(fields: [received_by_id], references: [id])
+
+  @@map("goods_received_notes")
+}
+
+model VendorInvoice {
+  id                 Int       @id @default(autoincrement())
+  tenant_id          Int
+  vendor_id          Int
+  po_id              Int
+  invoice_number     String
+  invoice_date       DateTime
+  subtotal_amount    Decimal   @db.Decimal(12, 2)
+  tax_amount         Decimal   @default(0) @db.Decimal(12, 2)
+  total_amount       Decimal   @db.Decimal(12, 2)
+  paid_amount        Decimal   @default(0) @db.Decimal(12, 2)
+  outstanding_amount Decimal   @default(0) @db.Decimal(12, 2)
+  status             String    @default("unpaid") // unpaid, partial, paid, disputed
+  attachment_id      Int?
+  created_by_id      Int?
+  created_at         DateTime  @default(now())
+  updated_at          DateTime  @updatedAt
+
+  vendor        Vendor         @relation(fields: [vendor_id], references: [id])
+  purchaseOrder PurchaseOrder  @relation(fields: [po_id], references: [id])
+  attachment    Attachment?    @relation(fields: [attachment_id], references: [id])
+  createdBy     User?          @relation(fields: [created_by_id], references: [id])
+
+  vendor_payments VendorPayment[]
+
+  @@map("vendor_invoices")
+}
+
+model VendorPayment {
+  id                 Int      @id @default(autoincrement())
+  tenant_id          Int
+  vendor_invoice_id  Int
+  amount_paid        Decimal  @db.Decimal(12, 2)
+  payment_mode       String   // cash, bank_transfer, upi, cheque
+  payment_date       DateTime
+  reference_no       String?
+  recorded_by_id     Int?
+  created_at         DateTime @default(now())
+
+  vendorInvoice VendorInvoice @relation(fields: [vendor_invoice_id], references: [id])
+  recordedBy    User?         @relation(fields: [recorded_by_id], references: [id])
+
+  @@map("vendor_payments")
+}
+
+// ============================================================
+// MODULE 11 — DISPATCH (trip-based, partial dispatch, delivery OTP)
+// ============================================================
+
+model Dispatch {
+  id              Int       @id @default(autoincrement())
+  tenant_id       Int
+  dispatch_number String
+  driver_id       Int
+  route_id        Int?
+  vehicle_number  String?
+  dispatch_time   DateTime?
+  status          String    @default("packed") // packed, dispatched, completed
+  created_at      DateTime  @default(now())
+
+  driver User           @relation(fields: [driver_id], references: [id])
+  route  DeliveryRoute? @relation(fields: [route_id], references: [id])
+
+  dispatchOrders DispatchOrder[]
+
+  @@unique([tenant_id, dispatch_number])
+  @@map("dispatches")
+}
+
+model DispatchOrder {
+  id                    Int       @id @default(autoincrement())
+  dispatch_id           Int
+  order_id              Int
+  stop_sequence         Int
+  received_by           String?
+  delivery_confirmed_at DateTime?
+  status                String    @default("pending") // pending, delivered, partially_delivered, failed
+
+  dispatch Dispatch        @relation(fields: [dispatch_id], references: [id])
+  order    RestaurantOrder @relation(fields: [order_id], references: [id])
+
+  items       DispatchItem[]
+  deliveryOtp DeliveryOtp?
+
+  @@unique([dispatch_id, order_id])
+  @@map("dispatch_orders")
+}
+
+model DispatchItem {
+  id                  Int     @id @default(autoincrement())
+  dispatch_order_id   Int
+  order_item_id       Int
+  product_id          Int
+  packed_qty          Decimal @db.Decimal(10, 2)
+
+  dispatchOrder DispatchOrder       @relation(fields: [dispatch_order_id], references: [id])
+  orderItem     RestaurantOrderItem @relation(fields: [order_item_id], references: [id])
+  product       Product             @relation(fields: [product_id], references: [id])
+
+  @@unique([dispatch_order_id, product_id])
+  @@map("dispatch_items")
+}
+
+// NEW — delivery-confirmation OTP. Deliberately separate from
+// otp_codes: the recipient here is the restaurant, verified by the
+// driver, not a user proving their own identity.
+model DeliveryOtp {
+  id                Int       @id @default(autoincrement())
+  dispatch_order_id Int       @unique
+  code              String
+  generated_at      DateTime  @default(now())
+  expires_at        DateTime
+  verified_at       DateTime?
+  attempts          Int       @default(0)
+  max_attempts      Int       @default(5)
+
+  dispatchOrder DispatchOrder @relation(fields: [dispatch_order_id], references: [id])
+
+  @@map("delivery_otps")
+}
+
+// attachments for proof-of-delivery images live in the generic
+// Attachment table below, with entity_type = 'dispatch_order'
+
+// ============================================================
+// MODULE 12 — BILLING (customer-side)
+// ============================================================
+
+model Invoice {
+  id                   Int       @id @default(autoincrement())
+  tenant_id            Int
+  invoice_number       String
+  restaurant_tenant_id Int
+  billing_type         String    // order_wise, daily, weekly, monthly
+  subtotal_amount      Decimal   @default(0) @db.Decimal(12, 2)
+  tax_amount           Decimal   @default(0) @db.Decimal(12, 2)
+  discount_amount      Decimal   @default(0) @db.Decimal(12, 2)
+  invoice_amount       Decimal   @db.Decimal(12, 2)
+  paid_amount          Decimal   @default(0) @db.Decimal(12, 2)
+  outstanding_amount   Decimal   @default(0) @db.Decimal(12, 2)
+  due_date             DateTime?
+  status               String    @default("unpaid") // paid, partial, unpaid, overdue
+  created_by_id        Int?
+  updated_by_id        Int?
+  created_at           DateTime  @default(now())
+  updated_at            DateTime  @updatedAt
+
+  restaurantTenant RestaurantTenant @relation(fields: [restaurant_tenant_id], references: [id])
+  createdBy        User?            @relation(fields: [created_by_id], references: [id])
+
+  invoiceOrders InvoiceOrder[]
+  payments      Payment[]
+
+  @@unique([tenant_id, invoice_number])
+  @@map("invoices")
+}
+
+model InvoiceOrder {
+  id         Int @id @default(autoincrement())
+  invoice_id Int
+  order_id   Int
+
+  invoice Invoice         @relation(fields: [invoice_id], references: [id])
+  order   RestaurantOrder @relation(fields: [order_id], references: [id])
+
+  @@unique([invoice_id, order_id])
+  @@map("invoice_orders")
+}
+
+model Payment {
+  id             Int      @id @default(autoincrement())
+  tenant_id      Int
+  invoice_id     Int
+  amount_paid    Decimal  @db.Decimal(12, 2)
+  payment_mode   String   // cash, bank_transfer, upi, cheque
+  payment_date   DateTime
+  reference_no   String?
+  recorded_by_id Int?
+  updated_by_id  Int?
+  created_at     DateTime @default(now())
+
+  invoice    Invoice @relation(fields: [invoice_id], references: [id])
+  recordedBy User?   @relation(fields: [recorded_by_id], references: [id])
+
+  @@map("payments")
+}
+
+// ============================================================
+// MODULE 15 — AUDIT LOG
+// ============================================================
+
+model AuditLog {
+  id          Int      @id @default(autoincrement())
+  tenant_id   Int?
+  user_id     Int?
+  entity_type String
+  entity_id   Int
+  action      String
+  old_value   Json?
+  new_value   Json?
+  ip_address  String?
+  created_at  DateTime @default(now())
+
+  tenant Tenant? @relation(fields: [tenant_id], references: [id])
+  user   User?   @relation(fields: [user_id], references: [id])
+
+  @@index([tenant_id, entity_type, entity_id])
+  @@map("audit_logs")
+}
+
+// ============================================================
+// MODULE 16 — NOTIFICATIONS (broadcast-capable)
+// ============================================================
+
+model Notification {
+  id               Int      @id @default(autoincrement())
+  tenant_id        Int
+  user_id          Int?
+  role_id          Int?
+  broadcast_tenant Boolean  @default(false)
+  type             String   // order_alert, stock_alert, payment_reminder
+  title            String
+  message          String
+  created_at       DateTime @default(now())
+
+  tenant Tenant @relation(fields: [tenant_id], references: [id])
+
+  reads NotificationRead[]
+
+  @@map("notifications")
+}
+
+model NotificationRead {
+  id              Int      @id @default(autoincrement())
+  notification_id Int
+  user_id         Int
+  read_at         DateTime @default(now())
+
+  notification Notification @relation(fields: [notification_id], references: [id])
+
+  @@unique([notification_id, user_id])
+  @@map("notification_reads")
+}
+
+// ============================================================
+// CROSS-CUTTING — ATTACHMENTS (generic file storage)
+// ============================================================
+
+model Attachment {
+  id           Int      @id @default(autoincrement())
+  tenant_id    Int
+  entity_type  String   // vendor, dispatch_order, invoice, vendor_invoice, product, user
+  entity_id    Int
+  file_name    String
+  file_url     String
+  mime_type    String?
+  uploaded_by_id Int?
+  created_at   DateTime @default(now())
+
+  tenant     Tenant  @relation(fields: [tenant_id], references: [id])
+  uploadedBy User?   @relation(fields: [uploaded_by_id], references: [id])
+
+  vendor_invoices VendorInvoice[]
+
+  @@index([tenant_id, entity_type, entity_id])
+  @@map("attachments")
 }
