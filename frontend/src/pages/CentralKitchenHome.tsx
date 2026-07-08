@@ -10,8 +10,23 @@ const API = 'http://localhost:3000';
 interface Role { id: number; name: string; code: string; type: string; }
 interface Category { id: number; name: string; }
 interface Unit { id: number; name: string; symbol: string; }
-interface RawMaterial { id: number; name: string; category: string | null; unit_id: number | null; }
+interface RawMaterial { id: number; name: string; category: string | null; unit_id: number | null; reorder_level: number | null; standard_price: number | null; unit?: { symbol: string }; }
 interface RecipeRow { raw_material_id: string; quantity: string; unit_id: string; }
+
+interface InventoryItem {
+  id: number; name: string; category: string | null; unit: string;
+  availableQuantity: number; batchCount: number; isLowStock: boolean;
+  reorderLevel: number; nextExpiry: string | null; standardPrice: number;
+}
+interface InventoryBatch {
+  id: number; batch_no: string | null; quantity: number; original_quantity: number;
+  purchase_price: number; manufactured_date: string | null; expiry_date: string | null;
+  supplier: string | null; remarks: string | null; created_at: string;
+}
+interface LedgerEntry {
+  id: number; created_at: string; transaction_type: string;
+  quantity: number; balance: number; remarks: string | null; created_by: string | null;
+}
 
 interface Restaurant {
   id: number; restaurant_id: number; restaurant_no: number; branch_code: string;
@@ -46,9 +61,39 @@ const emptyProduct = () => ({
   shelf_life_days: '', order_cutoff_hours: '0', lead_time_days: '0', allow_urgent_order: true,
 });
 const emptyRecipeRow = (): RecipeRow => ({ raw_material_id: '', quantity: '', unit_id: '' });
+const emptyRmForm = () => ({ name: '', category: '', unit_id: '', reorder_level: '', standard_price: '', status: 'active' });
+const emptyBatchForm = () => ({ raw_material_id: '', quantity: '', purchase_price: '', batch_no: '', manufactured_date: '', expiry_date: '', supplier: '', remarks: '' });
+const emptyAdjForm = () => ({ raw_material_id: '', quantity: '', reason: 'Damage', remarks: '' });
+
+const emptyInvite = () => ({ restaurant_name: '', contact_person: '', email: '', notes: '' });
+
+const ADJUSTMENT_REASONS = ['Damage', 'Spill', 'Spoilage', 'Return', 'Count Correction', 'Other'];
+
+const formatDateShort = (d: string | null) => {
+  if (!d) return '—';
+  return new Date(d).toLocaleString('en-IN', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+};
+
+const txLabel: Record<string, string> = {
+  inward: '📦 Purchase', outward: '📤 Outward', wastage: '🗑 Wastage',
+  adjustment: '🔧 Adjustment', production_consumption: '🍳 Production', production_output: '✅ Output'
+};
 
 // ─── Section Tab ──────────────────────────────────────────────────────────────
-type Section = 'dashboard' | 'restaurants' | 'users' | 'products';
+type Section = 'dashboard' | 'restaurants' | 'requests' | 'users' | 'products' | 'raw-materials' | 'inventory';
+
+interface OnboardingRequest {
+  id: number;
+  restaurant_name: string;
+  contact_person: string;
+  email: string;
+  status: string;
+  created_at: string;
+  updated_at: string;
+  expires_at: string;
+  notes: string | null;
+  city: string | null;
+}
 
 interface RestaurantOrderLine {
   restaurant_name: string;
@@ -76,6 +121,14 @@ export default function CentralKitchenHome() {
   const { user, accessToken, logout } = useAuth();
   const navigate = useNavigate();
   const [section, setSection] = useState<Section>('dashboard');
+
+  // Onboarding requests state
+  const [onboardings, setOnboardings] = useState<OnboardingRequest[]>([]);
+  const [selectedOnboardingDetail, setSelectedOnboardingDetail] = useState<any | null>(null);
+  const [showReviewModal, setShowReviewModal] = useState(false);
+  const [showActionModal, setShowActionModal] = useState<'approve' | 'reject' | 'changes' | null>(null);
+  const [actionReason, setActionReason] = useState('');
+  const [inviteForm, setInviteForm] = useState(emptyInvite());
 
   // Orders dashboard
   const [ordersSummary, setOrdersSummary] = useState<OrderSummaryItem[]>([]);
@@ -105,18 +158,55 @@ export default function CentralKitchenHome() {
   const [pForm, setPForm] = useState(emptyProduct());
   const [recipe, setRecipe] = useState<RecipeRow[]>([emptyRecipeRow()]);
 
+  // Inventory state
+  const [inventoryDashboard, setInventoryDashboard] = useState<InventoryItem[]>([]);
+  const [inventorySearch, setInventorySearch] = useState('');
+  const [rmSearch, setRmSearch] = useState('');
+  const [showBatchModal, setShowBatchModal] = useState(false);
+  const [showAdjModal, setShowAdjModal] = useState(false);
+  const [batchForm, setBatchForm] = useState(emptyBatchForm());
+  const [adjForm, setAdjForm] = useState(emptyAdjForm());
+  const [selectedRmDetail, setSelectedRmDetail] = useState<InventoryItem | null>(null);
+  const [rmBatches, setRmBatches] = useState<InventoryBatch[]>([]);
+  const [rmHistory, setRmHistory] = useState<LedgerEntry[]>([]);
+  const [detailTab, setDetailTab] = useState<'batches' | 'history'>('batches');
+  const [rmForm, setRmForm] = useState(emptyRmForm());
+  const [showRmForm, setShowRmForm] = useState(false);
+  const [editRmId, setEditRmId] = useState<number | null>(null);
+  const [invError, setInvError] = useState('');
+  const [invSuccess, setInvSuccess] = useState('');
+
   const authHeader = { Authorization: `Bearer ${accessToken}` };
 
   const handleLogout = () => { logout(); navigate('/login'); };
 
+  const fetchInventoryDashboard = useCallback(async () => {
+    try {
+      const res = await axios.get(`${API}/inventory/dashboard`, { headers: authHeader });
+      setInventoryDashboard(res.data.dashboard);
+    } catch (err: any) {
+      console.error('Failed to load inventory dashboard', err);
+    }
+  }, [accessToken]);
+
+  const fetchRawMaterials = useCallback(async () => {
+    try {
+      const res = await axios.get(`${API}/inventory/raw-materials`, { headers: authHeader });
+      setRawMaterials(res.data.rawMaterials);
+    } catch (err: any) {
+      console.error('Failed to load raw materials', err);
+    }
+  }, [accessToken]);
+
   const fetchAll = useCallback(async () => {
     try {
-      const [dd, rRes, uRes, pRes, sRes] = await Promise.all([
+      const [dd, rRes, uRes, pRes, sRes, oRes] = await Promise.all([
         axios.get(`${API}/admin/dropdown-data`, { headers: authHeader }),
         axios.get(`${API}/admin/restaurants`, { headers: authHeader }),
         axios.get(`${API}/admin/users/ck`, { headers: authHeader }),
         axios.get(`${API}/admin/products`, { headers: authHeader }),
         axios.get(`${API}/admin/orders/summary`, { headers: authHeader }),
+        axios.get(`${API}/admin/restaurants/onboarding`, { headers: authHeader }),
       ]);
       setRoles(dd.data.roles);
       setCategories(dd.data.categories);
@@ -126,6 +216,7 @@ export default function CentralKitchenHome() {
       setCkUsers(uRes.data.users);
       setProducts(pRes.data.products);
       setOrdersSummary(sRes.data.summary);
+      setOnboardings(oRes.data.onboardings);
     } catch (err: any) {
       if (err.response?.status === 401) { logout(); navigate('/login'); }
       console.error('Failed to load data', err);
@@ -133,11 +224,88 @@ export default function CentralKitchenHome() {
   }, [accessToken]);
 
   useEffect(() => { fetchAll(); }, [fetchAll]);
+  useEffect(() => { if (section === 'inventory') fetchInventoryDashboard(); }, [section, fetchInventoryDashboard]);
+  useEffect(() => { if (section === 'raw-materials') fetchRawMaterials(); }, [section, fetchRawMaterials]);
+
+  const openRmDetail = async (item: InventoryItem) => {
+    setSelectedRmDetail(item);
+    setDetailTab('batches');
+    try {
+      const [bRes, hRes] = await Promise.all([
+        axios.get(`${API}/inventory/raw-materials/${item.id}/batches`, { headers: authHeader }),
+        axios.get(`${API}/inventory/raw-materials/${item.id}/history`, { headers: authHeader }),
+      ]);
+      setRmBatches(bRes.data.batches);
+      setRmHistory(hRes.data.history);
+    } catch (err) { console.error(err); }
+  };
+
+  const handleBatchSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setInvError(''); setLoading(true);
+    try {
+      await axios.post(`${API}/inventory/batches`, batchForm, { headers: authHeader });
+      setInvSuccess('Inventory updated!');
+      setShowBatchModal(false);
+      setBatchForm(emptyBatchForm());
+      await fetchInventoryDashboard();
+      setTimeout(() => setInvSuccess(''), 3000);
+    } catch (err: any) {
+      setInvError(err.response?.data?.message ?? 'Failed to update inventory');
+    } finally { setLoading(false); }
+  };
+
+  const handleAdjSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setInvError(''); setLoading(true);
+    try {
+      await axios.post(`${API}/inventory/adjustments`, adjForm, { headers: authHeader });
+      setInvSuccess('Stock adjusted successfully!');
+      setShowAdjModal(false);
+      setAdjForm(emptyAdjForm());
+      await fetchInventoryDashboard();
+      setTimeout(() => setInvSuccess(''), 3000);
+    } catch (err: any) {
+      setInvError(err.response?.data?.message ?? 'Failed to adjust stock');
+    } finally { setLoading(false); }
+  };
+
+  const handleRmSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setInvError(''); setLoading(true);
+    try {
+      if (editRmId) {
+        await axios.put(`${API}/inventory/raw-materials/${editRmId}`, rmForm, { headers: authHeader });
+      } else {
+        await axios.post(`${API}/inventory/raw-materials`, rmForm, { headers: authHeader });
+      }
+      setInvSuccess(editRmId ? 'Updated!' : 'Raw material created!');
+      setShowRmForm(false);
+      setEditRmId(null);
+      setRmForm(emptyRmForm());
+      await fetchRawMaterials();
+      setTimeout(() => setInvSuccess(''), 3000);
+    } catch (err: any) {
+      setInvError(err.response?.data?.message ?? 'Operation failed');
+    } finally { setLoading(false); }
+  };
+
+  const handleDeleteRm = async (id: number) => {
+    setLoading(true);
+    try {
+      await axios.delete(`${API}/inventory/raw-materials/${id}`, { headers: authHeader });
+      setDeleteConfirm(null);
+      await fetchRawMaterials();
+    } catch (err: any) {
+      setInvError(err.response?.data?.message ?? 'Delete failed');
+    } finally { setLoading(false); }
+  };
 
   // ── Form open helpers ──
   const openAdd = () => {
     setEditId(null); setFormError(''); setFormSuccess(''); setShowForm(true);
     setRForm(emptyRestaurant()); setUForm(emptyUser()); setPForm(emptyProduct());
+    setInviteForm(emptyInvite());
     setRecipe([emptyRecipeRow()]);
   };
 
@@ -170,8 +338,13 @@ export default function CentralKitchenHome() {
     setFormError(''); setLoading(true);
     try {
       if (section === 'restaurants') {
-        if (editId) await axios.put(`${API}/admin/restaurants/${editId}`, rForm, { headers: authHeader });
-        else await axios.post(`${API}/admin/restaurants`, rForm, { headers: authHeader });
+        if (editId) {
+          await axios.put(`${API}/admin/restaurants/${editId}`, rForm, { headers: authHeader });
+        } else {
+          // Invite flow for new restaurant onboarding
+          await axios.post(`${API}/admin/restaurants/invite`, inviteForm, { headers: authHeader });
+          setInviteForm(emptyInvite());
+        }
       } else if (section === 'users') {
         if (uForm.password !== uForm.confirm_password) { setFormError('Passwords do not match'); setLoading(false); return; }
         const payload = { name: uForm.name, email: uForm.email, mobile: uForm.mobile, role_id: Number(uForm.role_id), password: uForm.password || undefined };
@@ -247,17 +420,31 @@ export default function CentralKitchenHome() {
 
       {/* Section tabs */}
       <div className="ck-tabs">
-        {(['dashboard', 'restaurants', 'users', 'products'] as Section[]).map(s => (
-          <button
-            key={s}
-            id={`tab-${s}`}
-            className={`ck-tab ${section === s ? 'ck-tab--active' : ''}`}
-            onClick={() => { setSection(s); setShowForm(false); setDeleteConfirm(null); setExpandedProductId(null); }}
-          >
-            {s === 'dashboard' ? '📊 Orders' : s === 'restaurants' ? '🏪 Restaurants' : s === 'users' ? '👤 Users' : '📦 Products'}
-          </button>
-        ))}
-        </div>
+        {(['dashboard', 'restaurants', 'requests', 'users', 'products', 'raw-materials', 'inventory'] as Section[]).map(s => {
+          const pendingCount = onboardings.filter(o => o.status === 'submitted' || o.status === 'submitted_again').length;
+          return (
+            <button
+              key={s}
+              id={`tab-${s}`}
+              className={`ck-tab ${section === s ? 'ck-tab--active' : ''}`}
+              onClick={() => { setSection(s); setShowForm(false); setDeleteConfirm(null); setExpandedProductId(null); setSelectedRmDetail(null); setShowRmForm(false); setShowBatchModal(false); setShowAdjModal(false); }}
+            >
+              {s === 'dashboard' && '📊 Orders'}
+              {s === 'restaurants' && '🏪 Restaurants'}
+              {s === 'requests' && (
+                <>
+                  🏪 Requests
+                  {pendingCount > 0 && <span className="tab-badge">{pendingCount}</span>}
+                </>
+              )}
+              {s === 'users' && '👤 Users'}
+              {s === 'products' && '📦 Products'}
+              {s === 'raw-materials' && '🌾 Raw Materials'}
+              {s === 'inventory' && '📦 Inventory'}
+            </button>
+          );
+        })}
+      </div>
 
       <main className="ck-body">
         {/* ── ORDERS DASHBOARD ── */}
@@ -356,7 +543,7 @@ export default function CentralKitchenHome() {
         )}
 
         {/* Header row (only for non-dashboard tabs) */}
-        {section !== 'dashboard' && (
+        {['restaurants', 'users', 'products'].includes(section) && (
         <div className="ck-section-header">
           <h2 className="ck-section-title">
             {section === 'restaurants' ? 'Restaurants' : section === 'users' ? 'CK Users' : 'Products'}
@@ -372,17 +559,28 @@ export default function CentralKitchenHome() {
         {/* ── FORM ── */}
         {showForm && (
           <div className="ck-form-card fade-in">
-            <div className="ck-form-title">{editId ? 'Edit' : 'Add'} {section === 'restaurants' ? 'Restaurant' : section === 'users' ? 'User' : 'Product'}</div>
+            <div className="ck-form-title">
+              {section === 'restaurants' && !editId ? 'Invite Restaurant' : (editId ? 'Edit ' : 'Add ') + (section === 'restaurants' ? 'Restaurant' : section === 'users' ? 'User' : 'Product')}
+            </div>
             <form onSubmit={handleSubmit} noValidate>
 
               {/* Restaurant form */}
               {section === 'restaurants' && (
-                <div className="ck-form-grid">
-                  <div className="ck-field"><label>Restaurant Name *</label><input className="ck-input" required value={rForm.name} onChange={e => setRForm({ ...rForm, name: e.target.value })} placeholder="e.g. Biryani Hub" /></div>
-                  <div className="ck-field"><label>Contact Number</label><input className="ck-input" value={rForm.contact_number} onChange={e => setRForm({ ...rForm, contact_number: e.target.value })} placeholder="9876543210" /></div>
-                  <div className="ck-field ck-field--full"><label>Address</label><textarea className="ck-input ck-textarea" value={rForm.address} onChange={e => setRForm({ ...rForm, address: e.target.value })} placeholder="Full address" /></div>
-                  <div className="ck-field"><label>GST Number</label><input className="ck-input" value={rForm.gst_number} onChange={e => setRForm({ ...rForm, gst_number: e.target.value })} placeholder="27AAPFU0939F1ZV" /></div>
-                </div>
+                editId ? (
+                  <div className="ck-form-grid">
+                    <div className="ck-field"><label>Restaurant Name *</label><input className="ck-input" required value={rForm.name} onChange={e => setRForm({ ...rForm, name: e.target.value })} placeholder="e.g. Biryani Hub" /></div>
+                    <div className="ck-field"><label>Contact Number</label><input className="ck-input" value={rForm.contact_number} onChange={e => setRForm({ ...rForm, contact_number: e.target.value })} placeholder="9876543210" /></div>
+                    <div className="ck-field ck-field--full"><label>Address</label><textarea className="ck-input ck-textarea" value={rForm.address} onChange={e => setRForm({ ...rForm, address: e.target.value })} placeholder="Full address" /></div>
+                    <div className="ck-field"><label>GST Number</label><input className="ck-input" value={rForm.gst_number} onChange={e => setRForm({ ...rForm, gst_number: e.target.value })} placeholder="27AAPFU0939F1ZV" /></div>
+                  </div>
+                ) : (
+                  <div className="ck-form-grid">
+                    <div className="ck-field"><label>Restaurant Name *</label><input className="ck-input" required value={inviteForm.restaurant_name} onChange={e => setInviteForm({ ...inviteForm, restaurant_name: e.target.value })} placeholder="e.g. ABC Grill" /></div>
+                    <div className="ck-field"><label>Contact Person *</label><input className="ck-input" required value={inviteForm.contact_person} onChange={e => setInviteForm({ ...inviteForm, contact_person: e.target.value })} placeholder="John Doe" /></div>
+                    <div className="ck-field ck-field--full"><label>Email Address *</label><input type="email" className="ck-input" required value={inviteForm.email} onChange={e => setInviteForm({ ...inviteForm, email: e.target.value })} placeholder="manager@abcgrill.com" /></div>
+                    <div className="ck-field ck-field--full"><label>Notes (Optional)</label><textarea className="ck-input ck-textarea" value={inviteForm.notes} onChange={e => setInviteForm({ ...inviteForm, notes: e.target.value })} placeholder="Any onboarding notes..." /></div>
+                  </div>
+                )
               )}
 
               {/* User form */}
@@ -480,7 +678,7 @@ export default function CentralKitchenHome() {
               <div className="ck-form-actions">
                 <button type="button" className="ck-btn-cancel" onClick={closeForm}>Cancel</button>
                 <button type="submit" className="ck-btn-submit" disabled={loading}>
-                  {loading ? <span className="spinner" /> : editId ? 'Save Changes' : 'Create'}
+                  {loading ? <span className="spinner" /> : (section === 'restaurants' && !editId) ? 'Send Invitation' : editId ? 'Save Changes' : 'Create'}
                 </button>
               </div>
             </form>
@@ -515,6 +713,168 @@ export default function CentralKitchenHome() {
                   </div>
                 </div>
               ))}
+          </div>
+        )}
+
+        {/* ── RESTAURANT REQUESTS TAB ── */}
+        {section === 'requests' && (
+          <div className="fade-in">
+            <div className="ck-section-header" style={{ marginBottom: '1.25rem' }}>
+              <h2 className="ck-section-title">🏪 Restaurant Requests</h2>
+              <button className="ck-btn-add" style={{ background: 'none', border: '1px solid var(--border)', color: 'var(--text-light)' }} onClick={fetchAll}>↻ Refresh</button>
+            </div>
+            {onboardings.length === 0 ? (
+              <div className="ck-empty">No onboarding requests yet. Use "Restaurants → + Add Restaurant" to send an invitation.</div>
+            ) : (
+              <div className="ck-list">
+                {onboardings.map(ob => (
+                  <div key={ob.id} className="ck-list-item">
+                    <div className="ck-list-item-main">
+                      <div className="ck-list-item-title">
+                        {ob.restaurant_name}
+                        <span className={`ob-status ob-status--${ob.status}`} style={{ marginLeft: '0.5rem' }}>{ob.status.replace('_', ' ')}</span>
+                      </div>
+                      <div className="ck-list-item-meta">
+                        <span>👤 {ob.contact_person}</span>
+                        <span>📧 {ob.email}</span>
+                        {ob.city && <span>📍 {ob.city}</span>}
+                        <span style={{ color: 'var(--text-light)', fontSize: '0.75rem' }}>Sent: {new Date(ob.created_at).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}</span>
+                      </div>
+                    </div>
+                    <div className="ck-list-item-actions">
+                      {(ob.status === 'submitted') && (
+                        <button className="ck-btn-edit" onClick={async () => {
+                          try {
+                            const res = await axios.get(`${API}/admin/restaurants/onboarding/${ob.id}`, { headers: authHeader });
+                            setSelectedOnboardingDetail(res.data.onboarding);
+                            setShowReviewModal(true);
+                          } catch (err: any) {
+                            alert(err.response?.data?.message ?? 'Failed to load details');
+                          }
+                        }}>Review</button>
+                      )}
+                      {(ob.status === 'invited' || ob.status === 'changes_requested') && (
+                        <span style={{ fontSize: '0.8rem', color: 'var(--text-light)' }}>Awaiting response</span>
+                      )}
+                      {ob.status === 'approved' && <span style={{ color: '#2e7d32', fontSize: '0.8rem' }}>✓ Approved</span>}
+                      {ob.status === 'rejected' && <span style={{ color: '#c62828', fontSize: '0.8rem' }}>✗ Rejected</span>}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* Review Modal */}
+            {showReviewModal && selectedOnboardingDetail && (
+              <div className="review-overlay" onClick={() => setShowReviewModal(false)}>
+                <div className="review-modal" onClick={e => e.stopPropagation()}>
+                  <div className="review-header">
+                    <h3 className="review-title">Review: {selectedOnboardingDetail.restaurant_name}</h3>
+                    <button className="review-close" onClick={() => setShowReviewModal(false)}>×</button>
+                  </div>
+                  <div className="review-body">
+                    <div className="review-section">
+                      <div className="review-section-title">Restaurant Details</div>
+                      <div className="review-grid">
+                        <div className="review-item"><strong>Restaurant Name</strong>{selectedOnboardingDetail.restaurant_name}</div>
+                        <div className="review-item"><strong>Trading Name</strong>{selectedOnboardingDetail.trading_name || '—'}</div>
+                        <div className="review-item"><strong>Company Reg No.</strong>{selectedOnboardingDetail.company_reg_no || '—'}</div>
+                        <div className="review-item"><strong>VAT Number</strong>{selectedOnboardingDetail.vat_no || '—'}</div>
+                        <div className="review-item review-item-full"><strong>Address</strong>{selectedOnboardingDetail.address || '—'}</div>
+                        <div className="review-item"><strong>City</strong>{selectedOnboardingDetail.city || '—'}</div>
+                        <div className="review-item"><strong>Postcode</strong>{selectedOnboardingDetail.postcode || '—'}</div>
+                      </div>
+                    </div>
+                    <div className="review-section">
+                      <div className="review-section-title">Contact</div>
+                      <div className="review-grid">
+                        <div className="review-item"><strong>Contact Person</strong>{selectedOnboardingDetail.contact_person}</div>
+                        <div className="review-item"><strong>Phone</strong>{selectedOnboardingDetail.phone || '—'}</div>
+                        <div className="review-item review-item-full"><strong>Email</strong>{selectedOnboardingDetail.email}</div>
+                      </div>
+                    </div>
+                    <div className="review-section">
+                      <div className="review-section-title">Delivery &amp; Billing</div>
+                      <div className="review-grid">
+                        <div className="review-item"><strong>Opening Hours</strong>{selectedOnboardingDetail.opening_hours || '—'}</div>
+                        <div className="review-item"><strong>Preferred Delivery Days</strong>{selectedOnboardingDetail.preferred_delivery_days || '—'}</div>
+                        <div className="review-item"><strong>Preferred Delivery Time</strong>{selectedOnboardingDetail.preferred_delivery_time || '—'}</div>
+                        <div className="review-item"><strong>Accounts Email</strong>{selectedOnboardingDetail.accounts_email || '—'}</div>
+                        <div className="review-item"><strong>Payment Terms</strong>{selectedOnboardingDetail.payment_terms || '—'}</div>
+                        <div className="review-item"><strong>PO Required</strong>{selectedOnboardingDetail.po_required ? 'Yes' : 'No'}</div>
+                      </div>
+                    </div>
+                    {showActionModal && (
+                      <div className="review-section">
+                        <div className="review-section-title">{showActionModal === 'reject' ? 'Rejection Reason' : 'Changes Required'}</div>
+                        <textarea
+                          className="ck-input ck-textarea"
+                          rows={3}
+                          placeholder={showActionModal === 'reject' ? 'State why this application is being rejected...' : 'Describe what needs to be corrected...'}
+                          value={actionReason}
+                          onChange={e => setActionReason(e.target.value)}
+                          autoFocus
+                        />
+                      </div>
+                    )}
+                  </div>
+                  <div className="review-actions">
+                    {showActionModal ? (
+                      <>
+                        <button className="ck-btn-cancel" onClick={() => { setShowActionModal(null); setActionReason(''); }}>Back</button>
+                        <button
+                          className={showActionModal === 'reject' ? 'review-btn-reject' : 'review-btn-changes'}
+                          disabled={loading || !actionReason.trim()}
+                          onClick={async () => {
+                            if (!actionReason.trim()) return;
+                            setLoading(true);
+                            try {
+                              const endpoint = showActionModal === 'reject' ? 'reject' : 'request-changes';
+                              await axios.post(`${API}/admin/restaurants/onboarding/${selectedOnboardingDetail.id}/${endpoint}`, { reason: actionReason }, { headers: authHeader });
+                              setShowReviewModal(false);
+                              setShowActionModal(null);
+                              setActionReason('');
+                              setSelectedOnboardingDetail(null);
+                              await fetchAll();
+                              setFormSuccess(showActionModal === 'reject' ? 'Application rejected.' : 'Changes requested. Email sent.');
+                              setTimeout(() => setFormSuccess(''), 3000);
+                            } catch (err: any) {
+                              setFormError(err.response?.data?.message ?? 'Action failed');
+                            } finally { setLoading(false); }
+                          }}
+                        >
+                          {showActionModal === 'reject' ? 'Confirm Rejection' : 'Send Changes Request'}
+                        </button>
+                      </>
+                    ) : (
+                      <>
+                        <button className="review-btn-reject" onClick={() => { setShowActionModal('reject'); setActionReason(''); }}>Reject</button>
+                        <button className="review-btn-changes" onClick={() => { setShowActionModal('changes'); setActionReason(''); }}>Request Changes</button>
+                        <button
+                          className="review-btn-approve"
+                          disabled={loading}
+                          onClick={async () => {
+                            setLoading(true);
+                            try {
+                              await axios.post(`${API}/admin/restaurants/onboarding/${selectedOnboardingDetail.id}/approve`, {}, { headers: authHeader });
+                              setShowReviewModal(false);
+                              setSelectedOnboardingDetail(null);
+                              await fetchAll();
+                              setFormSuccess('Restaurant approved! Welcome email sent.');
+                              setTimeout(() => setFormSuccess(''), 3000);
+                            } catch (err: any) {
+                              setFormError(err.response?.data?.message ?? 'Approval failed');
+                            } finally { setLoading(false); }
+                          }}
+                        >
+                          {loading ? '...' : '✓ Approve'}
+                        </button>
+                      </>
+                    )}
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
         )}
 
@@ -582,6 +942,290 @@ export default function CentralKitchenHome() {
                   </div>
                 </div>
               ))}
+          </div>
+        )}
+
+        {/* ── RAW MATERIALS MASTER ── */}
+        {section === 'raw-materials' && (
+          <div className="fade-in">
+            {invSuccess && <div className="inv-toast inv-toast--success">{invSuccess}</div>}
+            {invError && <div className="inv-toast inv-toast--error">{invError}</div>}
+
+            <div className="ck-section-header" style={{ marginBottom: '1.25rem' }}>
+              <h2 className="ck-section-title">🌾 Raw Materials Master</h2>
+              <button className="ck-btn-add" onClick={() => { setShowRmForm(true); setEditRmId(null); setRmForm(emptyRmForm()); setInvError(''); }}>+ Add Raw Material</button>
+            </div>
+
+            {showRmForm && (
+              <div className="inv-modal-overlay" onClick={() => setShowRmForm(false)}>
+                <div className="inv-modal" onClick={e => e.stopPropagation()}>
+                  <div className="inv-modal-header">
+                    <h3>{editRmId ? 'Edit Raw Material' : 'Add Raw Material'}</h3>
+                    <button className="inv-modal-close" onClick={() => setShowRmForm(false)}>✕</button>
+                  </div>
+                  <form onSubmit={handleRmSubmit} className="inv-form">
+                    <label>Name *<input className="ck-form-input" required value={rmForm.name} onChange={e => setRmForm(f => ({...f, name: e.target.value}))} /></label>
+                    <label>Category
+                      <select className="ck-form-select" value={rmForm.category} onChange={e => setRmForm(f => ({...f, category: e.target.value}))}>
+                        <option value="">— Select Category —</option>
+                        <option value="Produce">Produce</option>
+                        <option value="Dairy">Dairy</option>
+                        <option value="Meat & Poultry">Meat & Poultry</option>
+                        <option value="Seafood">Seafood</option>
+                        <option value="Dry Goods">Dry Goods</option>
+                        <option value="Spices">Spices</option>
+                        <option value="Oils & Condiments">Oils & Condiments</option>
+                        <option value="Bakery">Bakery</option>
+                        <option value="Beverages">Beverages</option>
+                        <option value="Packaging">Packaging</option>
+                        <option value="Other">Other</option>
+                      </select>
+                    </label>
+                    <label>Unit<select className="ck-form-select" value={rmForm.unit_id} onChange={e => setRmForm(f => ({...f, unit_id: e.target.value}))}>
+                      <option value="">— Select Unit —</option>
+                      {units.map(u => <option key={u.id} value={u.id}>{u.name} ({u.symbol})</option>)}
+                    </select></label>
+                    <label>Reorder Level<input className="ck-form-input" type="number" step="0.01" value={rmForm.reorder_level} onChange={e => setRmForm(f => ({...f, reorder_level: e.target.value}))} /></label>
+                    <label>Standard Purchase Price (₹)<input className="ck-form-input" type="number" step="0.01" value={rmForm.standard_price} onChange={e => setRmForm(f => ({...f, standard_price: e.target.value}))} /></label>
+                    <label>Status<select className="ck-form-select" value={rmForm.status} onChange={e => setRmForm(f => ({...f, status: e.target.value}))}>
+                      <option value="active">Active</option>
+                      <option value="inactive">Inactive</option>
+                    </select></label>
+                    {invError && <div className="ck-form-error">{invError}</div>}
+                    <div className="inv-modal-actions">
+                      <button type="button" className="ck-btn-cancel-sm" onClick={() => setShowRmForm(false)}>Cancel</button>
+                      <button type="submit" className="ck-btn-add" disabled={loading}>{loading ? 'Saving…' : 'Save'}</button>
+                    </div>
+                  </form>
+                </div>
+              </div>
+            )}
+
+            <div className="inv-search-bar">
+              <input className="inv-search-input" placeholder="🔍 Search raw materials…" value={rmSearch} onChange={e => setRmSearch(e.target.value)} />
+            </div>
+
+            <div className="ck-list">
+              {rawMaterials.filter(rm => rm.name.toLowerCase().includes(rmSearch.toLowerCase())).length === 0
+                ? <div className="ck-empty">No raw materials found. Click "+ Add Raw Material" to get started.</div>
+                : rawMaterials.filter(rm => rm.name.toLowerCase().includes(rmSearch.toLowerCase())).map(rm => (
+                <div key={rm.id} className="ck-list-item">
+                  <div className="ck-list-item-main">
+                    <div className="ck-list-item-title">
+                      {rm.name}
+                      {rm.category && <span className="ck-cat-badge">{rm.category}</span>}
+                    </div>
+                    <div className="ck-list-item-meta">
+                      {rm.unit && <span>Unit: <strong>{rm.unit.symbol}</strong></span>}
+                      {rm.reorder_level != null && <span>Reorder at: <strong>{rm.reorder_level}</strong></span>}
+                      {rm.standard_price != null && <span>Std. Price: <strong>₹{Number(rm.standard_price).toFixed(2)}</strong></span>}
+                    </div>
+                  </div>
+                  <div className="ck-list-item-actions">
+                    <button className="ck-btn-edit" onClick={() => { setEditRmId(rm.id); setRmForm({ name: rm.name, category: rm.category || '', unit_id: String(rm.unit_id || ''), reorder_level: String(rm.reorder_level || ''), standard_price: String(rm.standard_price || ''), status: 'active' }); setShowRmForm(true); setInvError(''); }}>Edit</button>
+                    {deleteConfirm === rm.id
+                      ? <><span className="ck-confirm-text">Sure?</span>
+                          <button className="ck-btn-delete-confirm" onClick={() => handleDeleteRm(rm.id)}>Yes, Delete</button>
+                          <button className="ck-btn-cancel-sm" onClick={() => setDeleteConfirm(null)}>Cancel</button></>
+                      : <button className="ck-btn-delete" onClick={() => setDeleteConfirm(rm.id)}>Delete</button>}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* ── INVENTORY OPERATIONS ── */}
+        {section === 'inventory' && !selectedRmDetail && (
+          <div className="fade-in">
+            {invSuccess && <div className="inv-toast inv-toast--success">{invSuccess}</div>}
+            {invError && <div className="inv-toast inv-toast--error">{invError}</div>}
+
+            <div className="ck-section-header" style={{ marginBottom: '1.25rem' }}>
+              <h2 className="ck-section-title">📦 Raw Materials Inventory</h2>
+              <div style={{ display: 'flex', gap: '0.5rem' }}>
+                <button className="inv-btn-secondary" onClick={() => { setAdjForm(emptyAdjForm()); setInvError(''); setShowAdjModal(true); }}>⚖ Adjust Stock</button>
+                <button className="ck-btn-add" onClick={() => { setBatchForm(emptyBatchForm()); setInvError(''); setShowBatchModal(true); }}>+ Update Inventory</button>
+              </div>
+            </div>
+
+            {/* Update Inventory Modal */}
+            {showBatchModal && (
+              <div className="inv-modal-overlay" onClick={() => setShowBatchModal(false)}>
+                <div className="inv-modal" onClick={e => e.stopPropagation()}>
+                  <div className="inv-modal-header">
+                    <h3>Update Inventory</h3>
+                    <button className="inv-modal-close" onClick={() => setShowBatchModal(false)}>✕</button>
+                  </div>
+                  <form onSubmit={handleBatchSubmit} className="inv-form">
+                    <label>Raw Material *
+                      <select className="ck-form-select" required value={batchForm.raw_material_id} onChange={e => setBatchForm(f => ({...f, raw_material_id: e.target.value}))}>
+                        <option value="">— Select —</option>
+                        {rawMaterials.map(rm => <option key={rm.id} value={rm.id}>{rm.name}</option>)}
+                      </select>
+                    </label>
+                    <div className="inv-form-row">
+                      <label>Quantity *<input className="ck-form-input" type="number" step="0.01" required value={batchForm.quantity} onChange={e => setBatchForm(f => ({...f, quantity: e.target.value}))} /></label>
+                      <label>Purchase Price (₹) *<input className="ck-form-input" type="number" step="0.01" required value={batchForm.purchase_price} onChange={e => setBatchForm(f => ({...f, purchase_price: e.target.value}))} /></label>
+                    </div>
+                    <label>Batch No (optional)<input className="ck-form-input" value={batchForm.batch_no} placeholder="Auto-generated if blank" onChange={e => setBatchForm(f => ({...f, batch_no: e.target.value}))} /></label>
+                    <div className="inv-form-row">
+                      <label>Manufactured Date<input className="ck-form-input" type="datetime-local" value={batchForm.manufactured_date} onChange={e => setBatchForm(f => ({...f, manufactured_date: e.target.value}))} /></label>
+                      <label>Expiry Date<input className="ck-form-input" type="datetime-local" value={batchForm.expiry_date} onChange={e => setBatchForm(f => ({...f, expiry_date: e.target.value}))} /></label>
+                    </div>
+                    <label>Supplier<input className="ck-form-input" value={batchForm.supplier} onChange={e => setBatchForm(f => ({...f, supplier: e.target.value}))} /></label>
+                    <label>Remarks<input className="ck-form-input" value={batchForm.remarks} onChange={e => setBatchForm(f => ({...f, remarks: e.target.value}))} /></label>
+                    {invError && <div className="ck-form-error">{invError}</div>}
+                    <div className="inv-modal-actions">
+                      <button type="button" className="ck-btn-cancel-sm" onClick={() => setShowBatchModal(false)}>Cancel</button>
+                      <button type="submit" className="ck-btn-add" disabled={loading}>{loading ? 'Saving…' : 'Save'}</button>
+                    </div>
+                  </form>
+                </div>
+              </div>
+            )}
+
+            {/* Adjust Stock Modal */}
+            {showAdjModal && (
+              <div className="inv-modal-overlay" onClick={() => setShowAdjModal(false)}>
+                <div className="inv-modal" onClick={e => e.stopPropagation()}>
+                  <div className="inv-modal-header">
+                    <h3>⚖ Adjust Stock</h3>
+                    <button className="inv-modal-close" onClick={() => setShowAdjModal(false)}>✕</button>
+                  </div>
+                  <form onSubmit={handleAdjSubmit} className="inv-form">
+                    <label>Raw Material *
+                      <select className="ck-form-select" required value={adjForm.raw_material_id} onChange={e => setAdjForm(f => ({...f, raw_material_id: e.target.value}))}>
+                        <option value="">— Select —</option>
+                        {rawMaterials.map(rm => <option key={rm.id} value={rm.id}>{rm.name}</option>)}
+                      </select>
+                    </label>
+                    <label>Quantity (use negative for reduction, e.g. -5) *<input className="ck-form-input" type="number" step="0.01" required value={adjForm.quantity} onChange={e => setAdjForm(f => ({...f, quantity: e.target.value}))} /></label>
+                    <label>Reason *
+                      <select className="ck-form-select" value={adjForm.reason} onChange={e => setAdjForm(f => ({...f, reason: e.target.value}))}>
+                        {ADJUSTMENT_REASONS.map(r => <option key={r}>{r}</option>)}
+                      </select>
+                    </label>
+                    <label>Remarks<input className="ck-form-input" value={adjForm.remarks} onChange={e => setAdjForm(f => ({...f, remarks: e.target.value}))} /></label>
+                    {invError && <div className="ck-form-error">{invError}</div>}
+                    <div className="inv-modal-actions">
+                      <button type="button" className="ck-btn-cancel-sm" onClick={() => setShowAdjModal(false)}>Cancel</button>
+                      <button type="submit" className="ck-btn-add" disabled={loading}>{loading ? 'Saving…' : 'Save Adjustment'}</button>
+                    </div>
+                  </form>
+                </div>
+              </div>
+            )}
+
+            <div className="inv-search-bar">
+              <input className="inv-search-input" placeholder="🔍 Search inventory…" value={inventorySearch} onChange={e => setInventorySearch(e.target.value)} />
+            </div>
+
+            <div className="inv-card-grid">
+              {inventoryDashboard.filter(item => item.name.toLowerCase().includes(inventorySearch.toLowerCase())).length === 0
+                ? <div className="ck-empty" style={{ gridColumn: '1 / -1' }}>No inventory data yet. Add batches using "Update Inventory".</div>
+                : inventoryDashboard.filter(item => item.name.toLowerCase().includes(inventorySearch.toLowerCase())).map(item => (
+                <div key={item.id} className={`inv-card ${item.isLowStock ? 'inv-card--low' : ''}`} onClick={() => openRmDetail(item)}>
+                  <div className="inv-card-name">{item.name}</div>
+                  <div className="inv-card-qty">
+                    {item.availableQuantity.toFixed(2)}
+                    <span className="inv-card-unit">{item.unit}</span>
+                  </div>
+                  <div className="inv-card-meta">
+                    <span>🗂 {item.batchCount} batch{item.batchCount !== 1 ? 'es' : ''}</span>
+                    {item.isLowStock && <span className="inv-badge-low">⚠ Low Stock</span>}
+                    {item.nextExpiry && <span className="inv-badge-expiry">⏱ Expires {new Date(item.nextExpiry).toLocaleDateString('en-IN')}</span>}
+                  </div>
+                  {item.category && <div className="inv-card-category">{item.category}</div>}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* ── INVENTORY DETAIL VIEW ── */}
+        {section === 'inventory' && selectedRmDetail && (
+          <div className="fade-in">
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '1.5rem' }}>
+              <button className="inv-btn-back" onClick={() => setSelectedRmDetail(null)}>← Back</button>
+              <h2 className="ck-section-title" style={{ margin: 0 }}>{selectedRmDetail.name}</h2>
+              {selectedRmDetail.isLowStock && <span className="inv-badge-low">⚠ Low Stock</span>}
+            </div>
+
+            <div className="inv-detail-stats">
+              <div className="inv-detail-stat">
+                <div className="inv-detail-stat-value">{selectedRmDetail.availableQuantity.toFixed(2)} <span style={{ fontSize: '1rem', fontWeight: 500 }}>{selectedRmDetail.unit}</span></div>
+                <div className="inv-detail-stat-label">Available</div>
+              </div>
+              <div className="inv-detail-stat">
+                <div className="inv-detail-stat-value">{selectedRmDetail.batchCount}</div>
+                <div className="inv-detail-stat-label">Active Batches</div>
+              </div>
+              <div className="inv-detail-stat">
+                <div className="inv-detail-stat-value">{selectedRmDetail.reorderLevel}</div>
+                <div className="inv-detail-stat-label">Reorder Level</div>
+              </div>
+              <div className="inv-detail-stat">
+                <div className="inv-detail-stat-value">{selectedRmDetail.nextExpiry ? new Date(selectedRmDetail.nextExpiry).toLocaleDateString('en-IN') : '—'}</div>
+                <div className="inv-detail-stat-label">Next Expiry</div>
+              </div>
+            </div>
+
+            <div className="inv-detail-tabs">
+              <button className={`inv-detail-tab ${detailTab === 'batches' ? 'inv-detail-tab--active' : ''}`} onClick={() => setDetailTab('batches')}>🗂 Batches</button>
+              <button className={`inv-detail-tab ${detailTab === 'history' ? 'inv-detail-tab--active' : ''}`} onClick={() => setDetailTab('history')}>📋 History</button>
+            </div>
+
+            {detailTab === 'batches' && (
+              <div className="inv-batch-list">
+                {rmBatches.length === 0
+                  ? <div className="ck-empty">No active batches for this item.</div>
+                  : rmBatches.map(batch => (
+                  <div key={batch.id} className="inv-batch-card">
+                    <div className="inv-batch-header">
+                      <span className="inv-batch-no">Batch #{batch.batch_no || batch.id}</span>
+                      <span className="inv-batch-qty">{Number(batch.quantity).toFixed(2)} {selectedRmDetail.unit}</span>
+                    </div>
+                    <div className="inv-batch-meta">
+                      <span>Added: {formatDateShort(batch.created_at)}</span>
+                      {batch.supplier && <span>Supplier: {batch.supplier}</span>}
+                      <span>Price: ₹{Number(batch.purchase_price).toFixed(2)}/unit</span>
+                      {batch.expiry_date && (
+                        <span className={new Date(batch.expiry_date) < new Date(Date.now() + 86400000) ? 'inv-expiry-soon' : ''}>
+                          Expires: {formatDateShort(batch.expiry_date)}
+                        </span>
+                      )}
+                    </div>
+                    {batch.remarks && <div className="inv-batch-remarks">{batch.remarks}</div>}
+                    <div className="inv-batch-progress">
+                      <div className="inv-batch-progress-bar" style={{ width: `${Math.min(100, (Number(batch.quantity) / Number(batch.original_quantity)) * 100)}%` }} />
+                    </div>
+                    <div style={{ fontSize: '0.7rem', color: 'var(--text-light)', textAlign: 'right', marginTop: '0.2rem' }}>
+                      {Number(batch.quantity).toFixed(2)} / {Number(batch.original_quantity).toFixed(2)} remaining
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {detailTab === 'history' && (
+              <div className="inv-history-table">
+                <div className="inv-history-head">
+                  <span>Time</span><span>Action</span><span>Qty Change</span><span>Balance</span><span>Note</span>
+                </div>
+                {rmHistory.length === 0
+                  ? <div className="ck-empty">No transactions recorded yet.</div>
+                  : rmHistory.map(entry => (
+                  <div key={entry.id} className={`inv-history-row ${entry.quantity < 0 ? 'inv-history-row--out' : 'inv-history-row--in'}`}>
+                    <span>{formatDateShort(entry.created_at)}</span>
+                    <span>{txLabel[entry.transaction_type] || entry.transaction_type}</span>
+                    <span className={entry.quantity < 0 ? 'inv-qty-neg' : 'inv-qty-pos'}>{entry.quantity > 0 ? '+' : ''}{entry.quantity.toFixed(2)} {selectedRmDetail.unit}</span>
+                    <span>{entry.balance.toFixed(2)} {selectedRmDetail.unit}</span>
+                    <span>{entry.remarks || '—'}</span>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         )}
       </main>

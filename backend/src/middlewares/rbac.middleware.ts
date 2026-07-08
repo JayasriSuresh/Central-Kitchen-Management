@@ -9,15 +9,12 @@ export const requirePermission = (module: string, action: string) => {
         return res.status(401).json({ message: 'Unauthorized' });
       }
 
-      const isSystemAdmin = 
-        user.role?.code === '01' || 
-        user.role?.name === 'SUPER_ADMIN' || 
-        (user.role?.is_system_role && user.role?.name === 'Super Admin');
+      const isSystemAdmin = user.primaryRole?.is_super_admin === true;
       if (isSystemAdmin) {
         return next(); // Super Admins can do everything
       }
 
-      const permissions = user.role?.role_permissions || [];
+      const permissions = user.primaryRole?.role_permissions || [];
       const hasPermission = permissions.some(
         (rp: any) => rp.permission.module === module && rp.permission.action === action
       );

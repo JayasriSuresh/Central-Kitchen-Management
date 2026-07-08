@@ -28,6 +28,7 @@ model Tenant {
   products           Product[]
   raw_materials      RawMaterial[]
   product_categories ProductCategory[]
+  restaurant_onboardings RestaurantOnboarding[]
   vendors            Vendor[]
   delivery_routes    DeliveryRoute[]
   production_plans   ProductionPlan[]
@@ -35,6 +36,7 @@ model Tenant {
   notifications      Notification[]
   attachments        Attachment[]
   login_attempts     LoginAttempt[]
+  inventory_batches  InventoryBatch[]
 
   @@map("tenants")
 }
@@ -428,12 +430,15 @@ model RawMaterial {
   tenant Tenant @relation(fields: [tenant_id], references: [id])
   unit   Unit?  @relation(fields: [unit_id], references: [id])
 
+  standard_price Decimal?  @db.Decimal(10, 2)
+
   recipe_ingredients          RecipeIngredient[]
   stock_transactions          StockTransaction[]
   stock_daily_summary         StockDailySummary[]
   stock_alerts                StockAlert[]
   raw_material_requirements   RawMaterialRequirement[]
   purchase_order_items        PurchaseOrderItem[]
+  inventory_batches           InventoryBatch[]
 
   @@map("raw_materials")
 }
@@ -536,23 +541,48 @@ model RestaurantOrderItem {
 // ============================================================
 
 model StockTransaction {
-  id               Int      @id @default(autoincrement())
-  tenant_id        Int
-  product_id       Int?
-  raw_material_id  Int?
-  transaction_type String   // inward, outward, wastage, adjustment, production_consumption, production_output
-  quantity         Decimal  @db.Decimal(10, 2)
-  reference_type   String?
-  reference_id     Int?
-  remarks          String?
-  created_by       String?
-  created_at       DateTime @default(now())
+  id                 Int             @id @default(autoincrement())
+  tenant_id          Int
+  product_id         Int?
+  raw_material_id    Int?
+  inventory_batch_id Int?
+  transaction_type   String          // inward, outward, wastage, adjustment, production_consumption, production_output
+  quantity           Decimal         @db.Decimal(10, 2)
+  reference_type     String?
+  reference_id       Int?
+  remarks            String?
+  created_by         String?
+  created_at         DateTime        @default(now())
 
-  product     Product?     @relation(fields: [product_id], references: [id])
-  rawMaterial RawMaterial? @relation(fields: [raw_material_id], references: [id])
+  product        Product?        @relation(fields: [product_id], references: [id])
+  rawMaterial    RawMaterial?    @relation(fields: [raw_material_id], references: [id])
+  inventoryBatch InventoryBatch? @relation(fields: [inventory_batch_id], references: [id], onDelete: Cascade)
 
   @@index([tenant_id, product_id, raw_material_id, created_at])
   @@map("stock_transactions")
+}
+
+model InventoryBatch {
+  id                 Int       @id @default(autoincrement())
+  tenant_id          Int
+  raw_material_id    Int
+  batch_no           String?
+  quantity           Decimal   @db.Decimal(10, 2)
+  original_quantity  Decimal   @db.Decimal(10, 2)
+  purchase_price     Decimal   @db.Decimal(10, 2)
+  manufactured_date  DateTime?
+  expiry_date        DateTime?
+  supplier           String?
+  remarks            String?
+  created_at         DateTime  @default(now())
+  updated_at         DateTime  @updatedAt
+
+  tenant       Tenant             @relation(fields: [tenant_id], references: [id])
+  rawMaterial  RawMaterial        @relation(fields: [raw_material_id], references: [id])
+  transactions StockTransaction[]
+
+  @@index([tenant_id, raw_material_id])
+  @@map("inventory_batches")
 }
 
 model StockDailySummary {
@@ -1022,3 +1052,47 @@ model Attachment {
   @@index([tenant_id, entity_type, entity_id])
   @@map("attachments")
 }
+
+model RestaurantOnboarding {
+  id                      Int       @id @default(autoincrement())
+  tenant_id               Int
+  token                   String    @unique
+  status                  String    @default("invited") // invited, submitted, approved, changes_requested, rejected
+  expires_at              DateTime
+  
+  // Basic info from invitation
+  restaurant_name         String
+  contact_person          String
+  email                   String
+  notes                   String?   @db.Text
+  rejection_reason        String?   @db.Text
+  
+  // Filled in by the restaurant in step 3
+  trading_name            String?
+  company_reg_no          String?
+  vat_no                  String?
+  address                 String?   @db.Text
+  postcode                String?
+  city                    String?
+  phone                   String?
+  
+  opening_hours           String?   @db.Text
+  delivery_instructions   String?   @db.Text
+  preferred_delivery_days String?
+  preferred_delivery_time String?
+
+  accounts_email          String?
+  payment_terms           String?
+  po_required             Boolean   @default(false)
+
+  // Login details set during registration
+  password_hash           String?
+
+  created_at              DateTime  @default(now())
+  updated_at              DateTime  @updatedAt
+
+  tenant Tenant @relation(fields: [tenant_id], references: [id])
+
+  @@map("restaurant_onboardings")
+}
+

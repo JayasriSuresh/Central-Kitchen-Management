@@ -8,6 +8,7 @@ import userRoutes from './routes/user.routes';
 import roleRoutes from './routes/role.routes';
 import adminRoutes from './routes/admin.routes';
 import restaurantRoutes from './routes/restaurant.routes';
+import inventoryRoutes from './routes/inventory.routes';
 
 dotenv.config();
 
@@ -42,6 +43,7 @@ app.use('/users', userRoutes);
 app.use('/roles', roleRoutes);
 app.use('/admin', adminRoutes);
 app.use('/restaurant', restaurantRoutes);
+app.use('/inventory', inventoryRoutes);
 // etc.
 
 app.listen(port, () => {

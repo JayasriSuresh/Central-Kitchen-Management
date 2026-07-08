@@ -136,22 +136,34 @@ export const clearFailedLogins = async (userId: number) => {
 export const seedTenantRoles = async (tx: Prisma.TransactionClient, tenantId: number) => {
   const systemRoles = await tx.role.findMany({
     where: { tenant_id: null },
-    select: { name: true, code: true, type: true, is_system_role: true },
+    include: { role_permissions: true },
   });
 
   if (systemRoles.length === 0) {
-    throw new Error('No system role templates found. Run `npx prisma db seed` first.');
+    throw new Error('No system role templates found. Run the seed script first.');
   }
 
-  await tx.role.createMany({
-    data: systemRoles.map((role) => ({
-      tenant_id: tenantId,
-      name: role.name,
-      code: role.code,
-      type: role.type,
-      is_system_role: role.is_system_role,
-    })),
-  });
+  for (const sysRole of systemRoles) {
+    const newRole = await tx.role.create({
+      data: {
+        tenant_id: tenantId,
+        name: sysRole.name,
+        code: sysRole.code,
+        type: sysRole.type,
+        is_system_role: sysRole.is_system_role,
+        is_super_admin: sysRole.is_super_admin,
+      },
+    });
+
+    if (sysRole.role_permissions.length > 0) {
+      await tx.rolePermission.createMany({
+        data: sysRole.role_permissions.map((rp) => ({
+          role_id: newRole.id,
+          permission_id: rp.permission_id,
+        })),
+      });
+    }
+  }
 };
 
 // ─── User ID generation ────────────────────────────────────────────────────

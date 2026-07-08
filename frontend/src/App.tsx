@@ -4,6 +4,7 @@ import Login from './pages/Login';
 import ForgotPassword from './pages/ForgotPassword';
 import CentralKitchenHome from './pages/CentralKitchenHome';
 import RestaurantHome from './pages/RestaurantHome';
+import RestaurantRegister from './pages/RestaurantRegister';
 import './index.css';
 
 // Role-based guard: redirects after login based on role_type
@@ -27,6 +28,7 @@ function App() {
         <Routes>
           <Route path="/login" element={<Login />} />
           <Route path="/forgot-password" element={<ForgotPassword />} />
+          <Route path="/onboarding/register" element={<RestaurantRegister />} />
 
           {/* Role-based redirect from /dashboard and / */}
           <Route path="/dashboard" element={<RoleRedirect />} />

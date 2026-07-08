@@ -16,6 +16,14 @@ import {
   deleteProduct,
   getOrdersSummary,
 } from '../controllers/admin.controller';
+import {
+  inviteRestaurant,
+  listOnboardings,
+  getOnboardingById,
+  approveOnboarding,
+  rejectOnboarding,
+  requestChangesOnboarding,
+} from '../controllers/onboarding.controller';
 
 const router = Router();
 
@@ -30,6 +38,14 @@ router.get('/restaurants', listRestaurants);
 router.post('/restaurants', createRestaurant);
 router.put('/restaurants/:id', updateRestaurant);
 router.delete('/restaurants/:id', deleteRestaurant);
+
+// Restaurant Onboarding (invite flow)
+router.post('/restaurants/invite', inviteRestaurant);
+router.get('/restaurants/onboarding', listOnboardings);
+router.get('/restaurants/onboarding/:id', getOnboardingById);
+router.post('/restaurants/onboarding/:id/approve', approveOnboarding);
+router.post('/restaurants/onboarding/:id/reject', rejectOnboarding);
+router.post('/restaurants/onboarding/:id/request-changes', requestChangesOnboarding);
 
 // CK Users
 router.get('/users/ck', listCkUsers);

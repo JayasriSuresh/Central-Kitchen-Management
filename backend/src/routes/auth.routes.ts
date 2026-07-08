@@ -16,6 +16,10 @@ import {
   loginOtpSend,
   loginOtpVerify,
 } from '../controllers/auth.controller';
+import {
+  getOnboardingDetailsByToken,
+  submitOnboardingRegistration,
+} from '../controllers/onboarding.controller';
 import { authMiddleware } from '../middlewares/auth.middleware';
 
 const router = Router();
@@ -34,9 +38,13 @@ router.post('/verify-otp', verifyOtp);
 router.post('/forgot-password', forgotPassword);
 router.post('/reset-password', resetPasswordWithOtp);
 
-// OTP Login (new feature — passwordless login flow)
+// OTP Login (passwordless login flow)
 router.post('/login-otp/send', loginOtpSend);
 router.post('/login-otp/verify', loginOtpVerify);
+
+// Public onboarding routes (no auth required — accessed via email link)
+router.get('/onboarding/invite', getOnboardingDetailsByToken);
+router.post('/onboarding/submit', submitOnboardingRegistration);
 
 // Protected (require valid access token)
 router.post('/logout-all', authMiddleware, logoutAll);

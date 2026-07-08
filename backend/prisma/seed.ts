@@ -1,5 +1,6 @@
 import { PrismaClient } from '@prisma/client';
 import bcrypt from 'bcrypt';
+import { seedTenantRoles } from '../src/services/auth.service';
 
 const prisma = new PrismaClient();
 
@@ -7,26 +8,278 @@ const prisma = new PrismaClient();
  * System role templates — canonical list, tenant_id = null.
  * When a new tenant signs up, these are copied as tenant-specific roles.
  */
-const systemRoles = [
-  // Central Kitchen Roles
-  { name: 'SUPER_ADMIN',       code: '01', type: 'central_kitchen', is_system_role: true  },
-  { name: 'KITCHEN_MANAGER',   code: '02', type: 'central_kitchen', is_system_role: false },
-  { name: 'INVENTORY_MANAGER', code: '03', type: 'central_kitchen', is_system_role: false },
-  { name: 'PURCHASE_MANAGER',  code: '04', type: 'central_kitchen', is_system_role: false },
-  { name: 'ACCOUNTS',          code: '05', type: 'central_kitchen', is_system_role: false },
-  { name: 'DELIVERY_STAFF',    code: '06', type: 'central_kitchen', is_system_role: false },
-  { name: 'CHEF',              code: '07', type: 'central_kitchen', is_system_role: false },
-  { name: 'STORE_KEEPER',      code: '08', type: 'central_kitchen', is_system_role: false },
-  { name: 'PURCHASE_APPROVER', code: '09', type: 'central_kitchen', is_system_role: false },
-  { name: 'FINANCE_APPROVER',  code: '10', type: 'central_kitchen', is_system_role: false },
-  { name: 'DISPATCH_MANAGER',  code: '11', type: 'central_kitchen', is_system_role: false },
-  // Restaurant Roles
-  { name: 'RESTAURANT_ADMIN',   code: '50', type: 'restaurant', is_system_role: false },
-  { name: 'RESTAURANT_MANAGER', code: '51', type: 'restaurant', is_system_role: false },
-  { name: 'RESTAURANT_STAFF',   code: '52', type: 'restaurant', is_system_role: false },
-  { name: 'BILLING_OPERATOR',   code: '53', type: 'restaurant', is_system_role: false },
-  { name: 'AUDITOR',            code: '54', type: 'restaurant', is_system_role: false },
+
+const PERMISSIONS = [
+  // 1. Login & User Management
+  { module: 'login_user_mgmt', action: 'view' },
+  { module: 'login_user_mgmt', action: 'create' },
+  { module: 'login_user_mgmt', action: 'edit' },
+  { module: 'login_user_mgmt', action: 'delete' },
+
+  // 2. Restaurant / Outlet
+  { module: 'restaurant_outlet', action: 'view' },
+  { module: 'restaurant_outlet', action: 'create' },
+  { module: 'restaurant_outlet', action: 'edit' },
+  { module: 'restaurant_outlet', action: 'delete' },
+
+  // 3. Product / Food Item
+  { module: 'product_food_item', action: 'view' },
+  { module: 'product_food_item', action: 'create' },
+  { module: 'product_food_item', action: 'edit' },
+  { module: 'product_food_item', action: 'delete' },
+
+  // 4. Recipe / Ingredient Mapping
+  { module: 'recipe_ingredient_mapping', action: 'view' },
+  { module: 'recipe_ingredient_mapping', action: 'create' },
+  { module: 'recipe_ingredient_mapping', action: 'edit' },
+  { module: 'recipe_ingredient_mapping', action: 'delete' },
+  { module: 'recipe_ingredient_mapping', action: 'approve' },
+
+  // 5. Restaurant Order Management
+  { module: 'restaurant_order_mgmt', action: 'view' },
+  { module: 'restaurant_order_mgmt', action: 'create' },
+  { module: 'restaurant_order_mgmt', action: 'edit' },
+  { module: 'restaurant_order_mgmt', action: 'delete' },
+
+  // 6. CK Order Dashboard
+  { module: 'ck_order_dashboard', action: 'view' },
+
+  // 7. Stock / Inventory
+  { module: 'stock_inventory', action: 'view' },
+  { module: 'stock_inventory', action: 'create' },
+  { module: 'stock_inventory', action: 'edit' },
+  { module: 'stock_inventory', action: 'delete' },
+
+  // 8. Production Planning
+  { module: 'production_planning', action: 'view' },
+  { module: 'production_planning', action: 'create' },
+  { module: 'production_planning', action: 'edit' },
+  { module: 'production_planning', action: 'delete' },
+  { module: 'production_planning', action: 'approve' },
+
+  // 9. Raw Material Requirement Calc
+  { module: 'raw_material_req_calc', action: 'view' },
+
+  // 10. Vendor / Purchase Management
+  { module: 'vendor_purchase_mgmt', action: 'view' },
+  { module: 'vendor_purchase_mgmt', action: 'create' },
+  { module: 'vendor_purchase_mgmt', action: 'edit' },
+  { module: 'vendor_purchase_mgmt', action: 'delete' },
+  { module: 'vendor_purchase_mgmt', action: 'approve' },
+
+  // 11. Dispatch & Delivery
+  { module: 'dispatch_delivery', action: 'view' },
+  { module: 'dispatch_delivery', action: 'create' },
+  { module: 'dispatch_delivery', action: 'edit' },
+  { module: 'dispatch_delivery', action: 'delete' },
+
+  // 12. Billing & Payment
+  { module: 'billing_payment', action: 'view' },
+  { module: 'billing_payment', action: 'create' },
+  { module: 'billing_payment', action: 'edit' },
+  { module: 'billing_payment', action: 'delete' },
+
+  // 13. Reports & Analytics (scope-specific view actions)
+  { module: 'reports_analytics', action: 'view_all' },
+  { module: 'reports_analytics', action: 'view_ops' },
+  { module: 'reports_analytics', action: 'view_stock' },
+  { module: 'reports_analytics', action: 'view_purchase' },
+  { module: 'reports_analytics', action: 'view_finance' },
+  { module: 'reports_analytics', action: 'view_restaurant' },
+
+  // 14. Role / Permission Management
+  { module: 'role_permission_mgmt', action: 'view' },
+  { module: 'role_permission_mgmt', action: 'create' },
+  { module: 'role_permission_mgmt', action: 'edit' },
+  { module: 'role_permission_mgmt', action: 'delete' },
+
+  // 15. Audit Log
+  { module: 'audit_log', action: 'view' },
+
+  // 16. Notifications
+  { module: 'notifications', action: 'view' },
+  { module: 'notifications', action: 'broadcast' },
+
+  // 17. Restaurant Dashboard
+  { module: 'restaurant_dashboard', action: 'view_override' },
+  { module: 'restaurant_dashboard', action: 'view_full' },
+  { module: 'restaurant_dashboard', action: 'view_limited' },
+
+  // 18. CK Dashboard
+  { module: 'ck_dashboard', action: 'view' },
+].map((p) => ({ ...p, code: `${p.module.toUpperCase()}_${p.action.toUpperCase()}` }));
+
+const ALL_CODES = PERMISSIONS.map((p) => p.code);
+
+const ROLE_PERMISSIONS: Record<string, string[]> = {
+  SUPER_ADMIN: ALL_CODES,
+
+  KITCHEN_MANAGER: [
+    'LOGIN_USER_MGMT_VIEW',
+    'RESTAURANT_OUTLET_VIEW',
+    'PRODUCT_FOOD_ITEM_VIEW', 'PRODUCT_FOOD_ITEM_CREATE', 'PRODUCT_FOOD_ITEM_EDIT',
+    'RECIPE_INGREDIENT_MAPPING_VIEW', 'RECIPE_INGREDIENT_MAPPING_CREATE', 'RECIPE_INGREDIENT_MAPPING_EDIT', 'RECIPE_INGREDIENT_MAPPING_APPROVE',
+    'RESTAURANT_ORDER_MGMT_VIEW', 'RESTAURANT_ORDER_MGMT_EDIT',
+    'CK_ORDER_DASHBOARD_VIEW',
+    'STOCK_INVENTORY_VIEW',
+    'PRODUCTION_PLANNING_VIEW', 'PRODUCTION_PLANNING_CREATE', 'PRODUCTION_PLANNING_EDIT', 'PRODUCTION_PLANNING_APPROVE',
+    'RAW_MATERIAL_REQ_CALC_VIEW',
+    'VENDOR_PURCHASE_MGMT_VIEW',
+    'DISPATCH_DELIVERY_VIEW', 'DISPATCH_DELIVERY_CREATE', 'DISPATCH_DELIVERY_EDIT',
+    'REPORTS_ANALYTICS_VIEW_OPS',
+    'NOTIFICATIONS_VIEW',
+    'CK_DASHBOARD_VIEW',
+  ],
+
+  INVENTORY_MANAGER: [
+    'LOGIN_USER_MGMT_VIEW',
+    'PRODUCT_FOOD_ITEM_VIEW',
+    'RECIPE_INGREDIENT_MAPPING_VIEW',
+    'RESTAURANT_ORDER_MGMT_VIEW',
+    'CK_ORDER_DASHBOARD_VIEW',
+    'STOCK_INVENTORY_VIEW', 'STOCK_INVENTORY_CREATE', 'STOCK_INVENTORY_EDIT', 'STOCK_INVENTORY_DELETE',
+    'PRODUCTION_PLANNING_VIEW',
+    'RAW_MATERIAL_REQ_CALC_VIEW',
+    'VENDOR_PURCHASE_MGMT_VIEW',
+    'DISPATCH_DELIVERY_VIEW',
+    'REPORTS_ANALYTICS_VIEW_STOCK',
+    'NOTIFICATIONS_VIEW',
+    'CK_DASHBOARD_VIEW',
+  ],
+
+  PURCHASE_MANAGER: [
+    'LOGIN_USER_MGMT_VIEW',
+    'PRODUCT_FOOD_ITEM_VIEW',
+    'RECIPE_INGREDIENT_MAPPING_VIEW',
+    'CK_ORDER_DASHBOARD_VIEW',
+    'STOCK_INVENTORY_VIEW',
+    'PRODUCTION_PLANNING_VIEW',
+    'RAW_MATERIAL_REQ_CALC_VIEW',
+    'VENDOR_PURCHASE_MGMT_VIEW', 'VENDOR_PURCHASE_MGMT_CREATE', 'VENDOR_PURCHASE_MGMT_EDIT', 'VENDOR_PURCHASE_MGMT_DELETE', 'VENDOR_PURCHASE_MGMT_APPROVE',
+    'REPORTS_ANALYTICS_VIEW_PURCHASE',
+    'NOTIFICATIONS_VIEW',
+    'CK_DASHBOARD_VIEW',
+  ],
+
+  ACCOUNTS: [
+    'LOGIN_USER_MGMT_VIEW',
+    'RESTAURANT_OUTLET_VIEW', 'RESTAURANT_OUTLET_EDIT',
+    'PRODUCT_FOOD_ITEM_VIEW',
+    'RECIPE_INGREDIENT_MAPPING_VIEW',
+    'RESTAURANT_ORDER_MGMT_VIEW',
+    'CK_ORDER_DASHBOARD_VIEW',
+    'STOCK_INVENTORY_VIEW',
+    'VENDOR_PURCHASE_MGMT_VIEW', 'VENDOR_PURCHASE_MGMT_EDIT',
+    'BILLING_PAYMENT_VIEW', 'BILLING_PAYMENT_CREATE', 'BILLING_PAYMENT_EDIT', 'BILLING_PAYMENT_DELETE',
+    'REPORTS_ANALYTICS_VIEW_FINANCE',
+    'NOTIFICATIONS_VIEW',
+    'CK_DASHBOARD_VIEW',
+  ],
+
+  DELIVERY_STAFF: [
+    'LOGIN_USER_MGMT_VIEW',
+    'RESTAURANT_OUTLET_VIEW',
+    'PRODUCT_FOOD_ITEM_VIEW',
+    'RESTAURANT_ORDER_MGMT_VIEW',
+    'DISPATCH_DELIVERY_VIEW', 'DISPATCH_DELIVERY_EDIT',
+    'NOTIFICATIONS_VIEW',
+  ],
+
+  RESTAURANT_ADMIN: [
+    'LOGIN_USER_MGMT_VIEW', 'LOGIN_USER_MGMT_CREATE', 'LOGIN_USER_MGMT_EDIT',
+    'RESTAURANT_OUTLET_VIEW', 'RESTAURANT_OUTLET_EDIT',
+    'PRODUCT_FOOD_ITEM_VIEW',
+    'RESTAURANT_ORDER_MGMT_VIEW', 'RESTAURANT_ORDER_MGMT_CREATE', 'RESTAURANT_ORDER_MGMT_EDIT', 'RESTAURANT_ORDER_MGMT_DELETE',
+    'DISPATCH_DELIVERY_VIEW',
+    'BILLING_PAYMENT_VIEW',
+    'REPORTS_ANALYTICS_VIEW_RESTAURANT',
+    'NOTIFICATIONS_VIEW',
+    'RESTAURANT_DASHBOARD_VIEW_FULL',
+  ],
+
+  RESTAURANT_MANAGER: [
+    'LOGIN_USER_MGMT_VIEW', 'LOGIN_USER_MGMT_CREATE', 'LOGIN_USER_MGMT_EDIT',
+    'RESTAURANT_OUTLET_VIEW',
+    'PRODUCT_FOOD_ITEM_VIEW',
+    'RESTAURANT_ORDER_MGMT_VIEW', 'RESTAURANT_ORDER_MGMT_CREATE', 'RESTAURANT_ORDER_MGMT_EDIT', 'RESTAURANT_ORDER_MGMT_DELETE',
+    'DISPATCH_DELIVERY_VIEW', 'DISPATCH_DELIVERY_EDIT',
+    'BILLING_PAYMENT_VIEW',
+    'REPORTS_ANALYTICS_VIEW_RESTAURANT',
+    'NOTIFICATIONS_VIEW',
+    'RESTAURANT_DASHBOARD_VIEW_FULL',
+  ],
+
+  RESTAURANT_STAFF: [
+    'LOGIN_USER_MGMT_VIEW',
+    'RESTAURANT_OUTLET_VIEW',
+    'PRODUCT_FOOD_ITEM_VIEW',
+    'RESTAURANT_ORDER_MGMT_VIEW', 'RESTAURANT_ORDER_MGMT_CREATE', 'RESTAURANT_ORDER_MGMT_EDIT',
+    'DISPATCH_DELIVERY_VIEW', 'DISPATCH_DELIVERY_EDIT',
+    'NOTIFICATIONS_VIEW',
+    'RESTAURANT_DASHBOARD_VIEW_LIMITED',
+  ],
+};
+
+const SYSTEM_ROLES = [
+  { name: 'SUPER_ADMIN', code: '01', type: 'central_kitchen', is_super_admin: true },
+  { name: 'KITCHEN_MANAGER', code: '02', type: 'central_kitchen', is_super_admin: false },
+  { name: 'INVENTORY_MANAGER', code: '03', type: 'central_kitchen', is_super_admin: false },
+  { name: 'PURCHASE_MANAGER', code: '04', type: 'central_kitchen', is_super_admin: false },
+  { name: 'ACCOUNTS', code: '05', type: 'central_kitchen', is_super_admin: false },
+  { name: 'DELIVERY_STAFF', code: '06', type: 'central_kitchen', is_super_admin: false },
+  { name: 'RESTAURANT_ADMIN', code: '50', type: 'restaurant', is_super_admin: false },
+  { name: 'RESTAURANT_MANAGER', code: '51', type: 'restaurant', is_super_admin: false },
+  { name: 'RESTAURANT_STAFF', code: '52', type: 'restaurant', is_super_admin: false },
+  { name: 'BILLING_OPERATOR', code: '53', type: 'restaurant', is_super_admin: false },
+  { name: 'AUDITOR', code: '54', type: 'restaurant', is_super_admin: false },
 ];
+
+async function seedSystemRolesAndPermissions(prisma: PrismaClient) {
+  // 1. Permissions catalog
+  for (const perm of PERMISSIONS) {
+    await prisma.permission.upsert({
+      where: { code: perm.code },
+      update: {},
+      create: perm,
+    });
+  }
+  console.log(`   ✓ Seeded ${PERMISSIONS.length} permissions`);
+
+  // 2. System roles (tenant_id: null)
+  for (const roleDef of SYSTEM_ROLES) {
+    const role = await prisma.role.upsert({
+      where: { tenant_id_code: { tenant_id: null, code: roleDef.code } },
+      update: {
+        name: roleDef.name,
+        type: roleDef.type,
+        is_system_role: true,
+        is_super_admin: roleDef.is_super_admin,
+      },
+      create: {
+        tenant_id: null,
+        name: roleDef.name,
+        code: roleDef.code,
+        type: roleDef.type,
+        is_system_role: true,
+        is_super_admin: roleDef.is_super_admin,
+      },
+    });
+
+    // 3. Assign permissions for this role
+    const codes = ROLE_PERMISSIONS[roleDef.name] || [];
+    const permissionRows = await prisma.permission.findMany({ where: { code: { in: codes } } });
+
+    for (const perm of permissionRows) {
+      await prisma.rolePermission.upsert({
+        where: { role_id_permission_id: { role_id: role.id, permission_id: perm.id } },
+        update: {},
+        create: { role_id: role.id, permission_id: perm.id },
+      });
+    }
+    console.log(`   ✓ Assigned ${permissionRows.length} permissions to ${roleDef.name}`);
+  }
+}
+
 
 // ─── Admin credentials (change after first login!) ───────────────────────────
 const ADMIN_EMAIL    = 'jaisrisureshkumar@gmail.com';
@@ -36,16 +289,9 @@ const ADMIN_PASSWORD = 'Jayasri@123';
 // ─────────────────────────────────────────────────────────────────────────────
 
 async function main() {
-  // 1. Seed system role templates
-  console.log('\n1️⃣  Seeding system role templates...');
-  for (const role of systemRoles) {
-    await prisma.role.upsert({
-      where: { id: await getSystemRoleId(role.code) },
-      update: { name: role.name, type: role.type, is_system_role: role.is_system_role },
-      create: { tenant_id: null, name: role.name, code: role.code, type: role.type, is_system_role: role.is_system_role },
-    });
-    console.log(`   ✓ ${role.name} (code: ${role.code})`);
-  }
+  // 1. Seed system role templates and permissions
+  console.log('\n1️⃣  Seeding system role templates and permissions...');
+  await seedSystemRolesAndPermissions(prisma);
 
   // 2. Create (or find) the default "Central Kitchen" tenant
   console.log('\n2️⃣  Seeding default tenant...');
@@ -55,18 +301,11 @@ async function main() {
     tenant = await prisma.tenant.create({ data: { name: 'Central Kitchen', code: 'CK', ck_no: 100, status: 'active' } });
     console.log(`   ✓ Created tenant: "${tenant.name}" (code: ${tenant.code}, ck_no: ${tenant.ck_no})`);
 
-    // Copy system roles for this tenant
-    const templates = await prisma.role.findMany({ where: { tenant_id: null } });
-    await prisma.role.createMany({
-      data: templates.map(r => ({
-        tenant_id: tenant!.id,
-        name: r.name,
-        code: r.code,
-        type: r.type,
-        is_system_role: r.is_system_role,
-      })),
+    // Copy system roles for this tenant using auth.service logic
+    await prisma.$transaction(async (tx) => {
+      await seedTenantRoles(tx, tenant!.id);
     });
-    console.log(`   ✓ Copied ${templates.length} roles for tenant`);
+    console.log(`   ✓ Copied roles and permissions for tenant`);
   } else {
     console.log(`   ℹ️  Tenant "Central Kitchen" already exists (id: ${tenant.id}, ck_no: ${tenant.ck_no})`);
   }
