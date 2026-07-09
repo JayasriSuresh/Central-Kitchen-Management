@@ -17,7 +17,7 @@ export const comparePassword = async (password: string, hash: string) => bcrypt.
 
 export const generateTokens = async (
   userId: number,
-  tenantId: number,
+  tenantId: number | null,
   userAgent?: string,
   ipAddress?: string,
   deviceName?: string,

@@ -112,6 +112,7 @@ const PERMISSIONS = [
 const ALL_CODES = PERMISSIONS.map((p) => p.code);
 
 const ROLE_PERMISSIONS: Record<string, string[]> = {
+  MASTER_ADMIN: ALL_CODES,
   SUPER_ADMIN: ALL_CODES,
 
   KITCHEN_MANAGER: [
@@ -221,6 +222,7 @@ const ROLE_PERMISSIONS: Record<string, string[]> = {
 };
 
 const SYSTEM_ROLES = [
+  { name: 'MASTER_ADMIN', code: '00', type: 'system', is_super_admin: true },
   { name: 'SUPER_ADMIN', code: '01', type: 'central_kitchen', is_super_admin: true },
   { name: 'KITCHEN_MANAGER', code: '02', type: 'central_kitchen', is_super_admin: false },
   { name: 'INVENTORY_MANAGER', code: '03', type: 'central_kitchen', is_super_admin: false },
@@ -247,23 +249,31 @@ async function seedSystemRolesAndPermissions(prisma: PrismaClient) {
 
   // 2. System roles (tenant_id: null)
   for (const roleDef of SYSTEM_ROLES) {
-    const role = await prisma.role.upsert({
-      where: { tenant_id_code: { tenant_id: null, code: roleDef.code } },
-      update: {
-        name: roleDef.name,
-        type: roleDef.type,
-        is_system_role: true,
-        is_super_admin: roleDef.is_super_admin,
-      },
-      create: {
-        tenant_id: null,
-        name: roleDef.name,
-        code: roleDef.code,
-        type: roleDef.type,
-        is_system_role: true,
-        is_super_admin: roleDef.is_super_admin,
-      },
+    let role = await prisma.role.findFirst({
+      where: { tenant_id: null, code: roleDef.code },
     });
+    if (role) {
+      role = await prisma.role.update({
+        where: { id: role.id },
+        data: {
+          name: roleDef.name,
+          type: roleDef.type,
+          is_system_role: true,
+          is_super_admin: roleDef.is_super_admin,
+        },
+      });
+    } else {
+      role = await prisma.role.create({
+        data: {
+          tenant_id: null,
+          name: roleDef.name,
+          code: roleDef.code,
+          type: roleDef.type,
+          is_system_role: true,
+          is_super_admin: roleDef.is_super_admin,
+        },
+      });
+    }
 
     // 3. Assign permissions for this role
     const codes = ROLE_PERMISSIONS[roleDef.name] || [];
@@ -524,6 +534,51 @@ async function main() {
     console.log(`      User ID : ${user_id}`);
   } else {
     console.log(`   ℹ️  Restaurant user already exists (email: ${restEmail})`);
+  }
+
+  // 6. Create the Master Admin User
+  console.log('\n6️⃣  Seeding Master Admin user...');
+  const masterEmail = 'master@admin.com';
+  const existingMaster = await prisma.user.findFirst({
+    where: { email: masterEmail },
+  });
+
+  if (!existingMaster) {
+    const masterRole = await prisma.role.findFirst({
+      where: { tenant_id: null, code: '00' },
+    });
+    if (!masterRole) throw new Error('MASTER_ADMIN system role not found');
+
+    const passwordHash = await bcrypt.hash('Master@123', 12);
+    const user_id = 'SYS000000001';
+
+    const user = await prisma.user.create({
+      data: {
+        tenant_id: null,
+        user_id,
+        username: 'master',
+        name: 'System Administrator',
+        email: masterEmail,
+        mobile: '9999999999',
+        password_hash: passwordHash,
+        primary_role_id: masterRole.id,
+        email_verified: true,
+        status: 'active',
+      },
+    });
+
+    await prisma.userRole.create({
+      data: {
+        user_id: user.id,
+        role_id: masterRole.id,
+      },
+    });
+
+    console.log(`   ✓ Created Master Admin user`);
+    console.log(`      Email   : ${masterEmail}`);
+    console.log(`      Password: Master@123`);
+  } else {
+    console.log(`   ℹ️  Master Admin user already exists`);
   }
 
   console.log('\n✅  Seed complete.\n');

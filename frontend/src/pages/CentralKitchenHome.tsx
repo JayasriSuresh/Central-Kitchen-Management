@@ -80,7 +80,7 @@ const txLabel: Record<string, string> = {
 };
 
 // ─── Section Tab ──────────────────────────────────────────────────────────────
-type Section = 'dashboard' | 'restaurants' | 'requests' | 'users' | 'products' | 'raw-materials' | 'inventory';
+type Section = 'dashboard' | 'restaurants' | 'requests' | 'users' | 'products' | 'raw-materials' | 'inventory' | 'production' | 'purchase';
 
 interface OnboardingRequest {
   id: number;
@@ -117,10 +117,63 @@ interface OrderSummaryItem {
   restaurants: RestaurantOrderLine[];
 }
 
+// ─── Production Planning Types ────────────────────────────────────────────────
+interface FEFOAllocation { batch_id: number; batch_no: string | null; expiry_date: string | null; allocated_qty: number; }
+interface RawMaterialRequirementPreview {
+  raw_material_id: number; raw_material_name: string; unit_symbol: string;
+  required_qty: number; available_qty: number; shortage: number;
+  status: 'enough' | 'short'; purchase_needed_qty: number;
+  fefo_allocations: FEFOAllocation[];
+}
+interface ProductionPlanPreview {
+  restaurant_demand: { restaurant_name: string; quantity: number }[];
+  total_demand: number; buffer_qty: number; finished_stock: number; required_qty: number;
+  has_recipe: boolean; recipe_id?: number;
+  raw_material_requirements: RawMaterialRequirementPreview[];
+  summary: { total: number; available: number; short: number };
+}
+interface ProductionPlan {
+  id: number; plan_date: string; status: string; created_at: string;
+  createdBy: { name: string } | null; approvedBy: { name: string } | null;
+  items: { id: number; product_id: number; total_orders_qty: number; buffer_qty: number; current_stock_qty: number; production_qty: number; status: string; product: { product_name: string; unit?: { symbol: string } } }[];
+  requirements: { id: number; raw_material_id: number; required_qty: number; available_qty: number; purchase_needed_qty: number; rawMaterial: { name: string; unit?: { symbol: string } }; purchase_requests: { id: number; status: string }[] }[];
+}
+interface PurchaseRequestItem {
+  id: number; request_number: string; status: string; requested_by: string | null; created_at: string;
+  requirement: { id: number; required_qty: number; purchase_needed_qty: number; rawMaterial: { name: string; unit?: { symbol: string } }; plan: { items: { product: { product_name: string } }[] } };
+  purchaseOrders: { id: number; po_number: string; status: string }[];
+}
+interface PurchaseOrder {
+  id: number; po_number: string; status: string; total_amount: number; created_at: string;
+  vendor: { name: string }; createdBy: { name: string } | null;
+  items: { id: number; raw_material_id: number; ordered_qty: number; received_qty: number; unit_price: number; rawMaterial: { name: string; unit?: { symbol: string } } }[];
+  goods_received_notes: { id: number; received_date: string }[];
+}
+interface VendorItem { id: number; name: string; contact_number?: string; }
+
 export default function CentralKitchenHome() {
   const { user, accessToken, logout } = useAuth();
   const navigate = useNavigate();
   const [section, setSection] = useState<Section>('dashboard');
+  const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>({ production: true, inventory: true, purchasing: false, administration: false });
+  const [showUserMenu, setShowUserMenu] = useState(false);
+
+  const navigateTo = (s: Section) => {
+    setSection(s);
+    setShowForm(false);
+    setDeleteConfirm(null);
+    setExpandedProductId(null);
+    setSelectedRmDetail(null);
+    setShowRmForm(false);
+    setShowBatchModal(false);
+    setShowAdjModal(false);
+    setSelectedPlan(null);
+    setPlanActionMsg('');
+    setShowUserMenu(false);
+  };
+
+  const toggleGroup = (g: string) => setExpandedGroups(prev => ({ ...prev, [g]: !prev[g] }));
 
   // Onboarding requests state
   const [onboardings, setOnboardings] = useState<OnboardingRequest[]>([]);
@@ -133,6 +186,38 @@ export default function CentralKitchenHome() {
   // Orders dashboard
   const [ordersSummary, setOrdersSummary] = useState<OrderSummaryItem[]>([]);
   const [expandedProductId, setExpandedProductId] = useState<number | null>(null);
+
+  // Production planning state
+  const [showPlanModal, setShowPlanModal] = useState(false);
+  const [planningProductId, setPlanningProductId] = useState<number | null>(null);
+  const [planningProductName, setPlanningProductName] = useState('');
+  const [planBufferQty, setPlanBufferQty] = useState('0');
+  const [planPreview, setPlanPreview] = useState<ProductionPlanPreview | null>(null);
+  const [planPreviewLoading, setPlanPreviewLoading] = useState(false);
+  const [planPreviewError, setPlanPreviewError] = useState('');
+  const [savingPlan, setSavingPlan] = useState(false);
+  const [planSaveSuccess, setPlanSaveSuccess] = useState('');
+  const [expandedRMId, setExpandedRMId] = useState<number | null>(null);
+
+  // Production plans list tab
+  const [productionPlans, setProductionPlans] = useState<ProductionPlan[]>([]);
+  const [selectedPlan, setSelectedPlan] = useState<ProductionPlan | null>(null);
+  const [planActionLoading, setPlanActionLoading] = useState(false);
+  const [planActionMsg, setPlanActionMsg] = useState('');
+
+  // Purchase tab state
+  const [purchaseRequests, setPurchaseRequests] = useState<PurchaseRequestItem[]>([]);
+  const [purchaseOrders, setPurchaseOrders] = useState<PurchaseOrder[]>([]);
+  const [vendors, setVendors] = useState<VendorItem[]>([]);
+  const [purchaseSubTab, setPurchaseSubTab] = useState<'requests' | 'orders' | 'vendors'>('requests');
+  const [approveModal, setApproveModal] = useState<PurchaseRequestItem | null>(null);
+  const [approveForm, setApproveForm] = useState({ vendor_id: '', unit_price: '', modified_qty: '', expected_delivery_date: '' });
+  const [grnModal, setGrnModal] = useState<PurchaseOrder | null>(null);
+  const [grnForm, setGrnForm] = useState<{ raw_material_id: number; name: string; ordered_qty: number; received_qty: string; batch_no: string; expiry_date: string; purchase_price: string }[]>([]);
+  const [purchaseMsg, setPurchaseMsg] = useState('');
+  const [purchaseErr, setPurchaseErr] = useState('');
+  const [vendorForm, setVendorForm] = useState({ name: '', contact_number: '', gst_number: '', payment_terms: '', address: '' });
+  const [showVendorForm, setShowVendorForm] = useState(false);
 
   // Dropdown data
   const [roles, setRoles] = useState<Role[]>([]);
@@ -198,6 +283,116 @@ export default function CentralKitchenHome() {
     }
   }, [accessToken]);
 
+  const fetchProductionPlans = useCallback(async () => {
+    try {
+      const res = await axios.get(`${API}/production/plans`, { headers: authHeader });
+      setProductionPlans(res.data.plans);
+    } catch (err: any) { console.error('Failed to load production plans', err); }
+  }, [accessToken]);
+
+  const fetchPurchaseData = useCallback(async () => {
+    try {
+      const [rRes, oRes, vRes] = await Promise.all([
+        axios.get(`${API}/purchase/requests`, { headers: authHeader }),
+        axios.get(`${API}/purchase/orders`, { headers: authHeader }),
+        axios.get(`${API}/purchase/vendors`, { headers: authHeader }),
+      ]);
+      setPurchaseRequests(rRes.data.requests);
+      setPurchaseOrders(oRes.data.orders);
+      setVendors(vRes.data.vendors);
+    } catch (err: any) { console.error('Failed to load purchase data', err); }
+  }, [accessToken]);
+
+  const openPlanModal = async (productId: number, productName: string) => {
+    setPlanningProductId(productId);
+    setPlanningProductName(productName);
+    setPlanBufferQty('0');
+    setPlanPreview(null);
+    setPlanPreviewError('');
+    setPlanSaveSuccess('');
+    setExpandedRMId(null);
+    setShowPlanModal(true);
+  };
+
+  const runPreview = async () => {
+    if (!planningProductId) return;
+    setPlanPreviewLoading(true);
+    setPlanPreviewError('');
+    setPlanPreview(null);
+    try {
+      const res = await axios.post(`${API}/production/plans/preview`,
+        { product_id: planningProductId, buffer_qty: Number(planBufferQty) || 0 },
+        { headers: authHeader }
+      );
+      setPlanPreview(res.data);
+    } catch (err: any) {
+      setPlanPreviewError(err.response?.data?.message ?? 'Preview failed');
+    } finally { setPlanPreviewLoading(false); }
+  };
+
+  const saveDraftPlan = async () => {
+    if (!planningProductId || !planPreview) return;
+    setSavingPlan(true);
+    try {
+      await axios.post(`${API}/production/plans`,
+        { product_id: planningProductId, buffer_qty: Number(planBufferQty) || 0 },
+        { headers: authHeader }
+      );
+      setPlanSaveSuccess('✓ Draft plan created! Go to the Production Plans tab to manage it.');
+      await fetchProductionPlans();
+    } catch (err: any) {
+      setPlanPreviewError(err.response?.data?.message ?? 'Failed to save plan');
+    } finally { setSavingPlan(false); }
+  };
+
+  const handlePlanAction = async (planId: number, action: string) => {
+    setPlanActionLoading(true);
+    setPlanActionMsg('');
+    try {
+      await axios.post(`${API}/production/plans/${planId}/${action}`, {}, { headers: authHeader });
+      await fetchProductionPlans();
+      if (selectedPlan?.id === planId) {
+        const res = await axios.get(`${API}/production/plans/${planId}`, { headers: authHeader });
+        setSelectedPlan(res.data.plan);
+      }
+      setPlanActionMsg(action === 'start' ? '✓ Production started! Inventory has been deducted.' : action === 'material-request' ? '✓ Material requests generated.' : '✓ Plan updated.');
+      setTimeout(() => setPlanActionMsg(''), 4000);
+    } catch (err: any) {
+      setPlanActionMsg('Error: ' + (err.response?.data?.message ?? 'Action failed'));
+    } finally { setPlanActionLoading(false); }
+  };
+
+  const openGrnModal = (po: PurchaseOrder) => {
+    setGrnModal(po);
+    setGrnForm(po.items.map(item => ({
+      raw_material_id: item.raw_material_id,
+      name: item.rawMaterial.name,
+      ordered_qty: Number(item.ordered_qty),
+      received_qty: String(Number(item.ordered_qty) - Number(item.received_qty)),
+      batch_no: '',
+      expiry_date: '',
+      purchase_price: String(Number(item.unit_price)),
+    })));
+  };
+
+  const submitGRN = async () => {
+    if (!grnModal) return;
+    setPlanActionLoading(true);
+    setPurchaseErr('');
+    try {
+      await axios.post(`${API}/purchase/orders/${grnModal.id}/grn`,
+        { items: grnForm.map(f => ({ ...f, received_qty: Number(f.received_qty), purchase_price: Number(f.purchase_price) })) },
+        { headers: authHeader }
+      );
+      setGrnModal(null);
+      setPurchaseMsg('✓ Goods received! Inventory updated.');
+      await Promise.all([fetchPurchaseData(), fetchInventoryDashboard()]);
+      setTimeout(() => setPurchaseMsg(''), 4000);
+    } catch (err: any) {
+      setPurchaseErr(err.response?.data?.message ?? 'GRN failed');
+    } finally { setPlanActionLoading(false); }
+  };
+
   const fetchAll = useCallback(async () => {
     try {
       const [dd, rRes, uRes, pRes, sRes, oRes] = await Promise.all([
@@ -226,6 +421,8 @@ export default function CentralKitchenHome() {
   useEffect(() => { fetchAll(); }, [fetchAll]);
   useEffect(() => { if (section === 'inventory') fetchInventoryDashboard(); }, [section, fetchInventoryDashboard]);
   useEffect(() => { if (section === 'raw-materials') fetchRawMaterials(); }, [section, fetchRawMaterials]);
+  useEffect(() => { if (section === 'production') fetchProductionPlans(); }, [section, fetchProductionPlans]);
+  useEffect(() => { if (section === 'purchase') fetchPurchaseData(); }, [section, fetchPurchaseData]);
 
   const openRmDetail = async (item: InventoryItem) => {
     setSelectedRmDetail(item);
@@ -407,46 +604,138 @@ export default function CentralKitchenHome() {
 
   const ckRoles = roles.filter(r => r.type === 'central_kitchen');
 
+  const pendingCount = onboardings.filter(o => o.status === 'submitted' || o.status === 'submitted_again').length;
+
   return (
     <div className="ck-page">
-      {/* Nav */}
-      <nav className="dash-nav">
-        <div className="dash-nav-brand"><span>🍽</span> Central Kitchen</div>
-        <div className="dash-nav-actions">
-          <span className="ck-user-name">{user?.name}</span>
-          <button className="btn-ghost" onClick={handleLogout}>Logout</button>
+
+      {/* ── TOP BAR ── */}
+      <header className="ck-topbar">
+        <div className="ck-topbar-left">
+          <button className="ck-burger" onClick={() => setSidebarOpen(o => !o)} aria-label="Toggle menu">
+            <span /><span /><span />
+          </button>
+          <div className="ck-topbar-brand">🍽 Central Kitchen ERP</div>
         </div>
-      </nav>
-
-      {/* Section tabs */}
-      <div className="ck-tabs">
-        {(['dashboard', 'restaurants', 'requests', 'users', 'products', 'raw-materials', 'inventory'] as Section[]).map(s => {
-          const pendingCount = onboardings.filter(o => o.status === 'submitted' || o.status === 'submitted_again').length;
-          return (
-            <button
-              key={s}
-              id={`tab-${s}`}
-              className={`ck-tab ${section === s ? 'ck-tab--active' : ''}`}
-              onClick={() => { setSection(s); setShowForm(false); setDeleteConfirm(null); setExpandedProductId(null); setSelectedRmDetail(null); setShowRmForm(false); setShowBatchModal(false); setShowAdjModal(false); }}
-            >
-              {s === 'dashboard' && '📊 Orders'}
-              {s === 'restaurants' && '🏪 Restaurants'}
-              {s === 'requests' && (
-                <>
-                  🏪 Requests
-                  {pendingCount > 0 && <span className="tab-badge">{pendingCount}</span>}
-                </>
-              )}
-              {s === 'users' && '👤 Users'}
-              {s === 'products' && '📦 Products'}
-              {s === 'raw-materials' && '🌾 Raw Materials'}
-              {s === 'inventory' && '📦 Inventory'}
+        <div className="ck-topbar-right">
+          <div className="ck-user-menu-wrap">
+            <button className="ck-user-btn" onClick={() => setShowUserMenu(m => !m)}>
+              <span className="ck-user-avatar">{user?.name?.charAt(0).toUpperCase()}</span>
+              <span className="ck-user-name-top">{user?.name}</span>
+              <span className="ck-user-caret">▾</span>
             </button>
-          );
-        })}
-      </div>
+            {showUserMenu && (
+              <div className="ck-user-dropdown">
+                <div className="ck-user-dropdown-info">
+                  <div className="ck-user-dropdown-name">{user?.name}</div>
+                  <div className="ck-user-dropdown-role">Kitchen Manager</div>
+                </div>
+                <div className="ck-user-dropdown-divider" />
+                <button className="ck-user-dropdown-item ck-user-dropdown-item--danger" onClick={handleLogout}>
+                  Sign out
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
+      </header>
 
-      <main className="ck-body">
+      {/* ── LAYOUT: sidebar + content ── */}
+      <div className={`ck-layout ${sidebarOpen ? '' : 'ck-layout--collapsed'}`}>
+
+        {/* ── SIDEBAR ── */}
+        <aside className="ck-sidebar">
+          <nav className="ck-nav">
+
+            {/* Dashboard */}
+            <button className={`ck-nav-item ${section === 'dashboard' ? 'ck-nav-item--active' : ''}`}
+              onClick={() => navigateTo('dashboard')}>
+              <span className="ck-nav-icon">📊</span>
+              <span className="ck-nav-label">Orders Dashboard</span>
+            </button>
+
+            {/* Production group */}
+            <div className="ck-nav-group">
+              <button className="ck-nav-group-header" onClick={() => toggleGroup('production')}>
+                <span className="ck-nav-icon">🏭</span>
+                <span className="ck-nav-label">Production</span>
+                <span className="ck-nav-caret">{expandedGroups.production ? '▾' : '▸'}</span>
+              </button>
+              {expandedGroups.production && (
+                <div className="ck-nav-children">
+                  <button className={`ck-nav-child ${section === 'production' ? 'ck-nav-child--active' : ''}`}
+                    onClick={() => navigateTo('production')}>Planning</button>
+                  <button className="ck-nav-child ck-nav-child--soon">Queue <span className="ck-soon-tag">Soon</span></button>
+                  <button className="ck-nav-child ck-nav-child--soon">Batch History <span className="ck-soon-tag">Soon</span></button>
+                </div>
+              )}
+            </div>
+
+            {/* Inventory group */}
+            <div className="ck-nav-group">
+              <button className="ck-nav-group-header" onClick={() => toggleGroup('inventory')}>
+                <span className="ck-nav-icon">📦</span>
+                <span className="ck-nav-label">Inventory</span>
+                <span className="ck-nav-caret">{expandedGroups.inventory ? '▾' : '▸'}</span>
+              </button>
+              {expandedGroups.inventory && (
+                <div className="ck-nav-children">
+                  <button className={`ck-nav-child ${section === 'raw-materials' ? 'ck-nav-child--active' : ''}`}
+                    onClick={() => navigateTo('raw-materials')}>Raw Materials</button>
+                  <button className={`ck-nav-child ${section === 'inventory' ? 'ck-nav-child--active' : ''}`}
+                    onClick={() => navigateTo('inventory')}>Stock Levels</button>
+                  <button className="ck-nav-child ck-nav-child--soon">Finished Goods <span className="ck-soon-tag">Soon</span></button>
+                </div>
+              )}
+            </div>
+
+            {/* Purchasing group */}
+            <div className="ck-nav-group">
+              <button className="ck-nav-group-header" onClick={() => toggleGroup('purchasing')}>
+                <span className="ck-nav-icon">🛒</span>
+                <span className="ck-nav-label">Purchasing</span>
+                <span className="ck-nav-caret">{expandedGroups.purchasing ? '▾' : '▸'}</span>
+              </button>
+              {expandedGroups.purchasing && (
+                <div className="ck-nav-children">
+                  <button className={`ck-nav-child ${section === 'purchase' ? 'ck-nav-child--active' : ''}`}
+                    onClick={() => { navigateTo('purchase'); setPurchaseSubTab('requests'); }}>Material Requests</button>
+                  <button className={`ck-nav-child ${section === 'purchase' ? 'ck-nav-child--active' : ''}`}
+                    onClick={() => { navigateTo('purchase'); setPurchaseSubTab('orders'); }}>Purchase Orders</button>
+                  <button className={`ck-nav-child ${section === 'purchase' ? 'ck-nav-child--active' : ''}`}
+                    onClick={() => { navigateTo('purchase'); setPurchaseSubTab('vendors'); }}>Vendors</button>
+                </div>
+              )}
+            </div>
+
+            {/* Administration group */}
+            <div className="ck-nav-group">
+              <button className="ck-nav-group-header" onClick={() => toggleGroup('administration')}>
+                <span className="ck-nav-icon">⚙️</span>
+                <span className="ck-nav-label">Administration</span>
+                <span className="ck-nav-caret">{expandedGroups.administration ? '▾' : '▸'}</span>
+              </button>
+              {expandedGroups.administration && (
+                <div className="ck-nav-children">
+                  <button className={`ck-nav-child ${section === 'restaurants' ? 'ck-nav-child--active' : ''}`}
+                    onClick={() => navigateTo('restaurants')}>Restaurants</button>
+                  <button className={`ck-nav-child ${section === 'requests' ? 'ck-nav-child--active' : ''}`}
+                    onClick={() => navigateTo('requests')}>
+                    Requests {pendingCount > 0 && <span className="ck-nav-badge">{pendingCount}</span>}
+                  </button>
+                  <button className={`ck-nav-child ${section === 'users' ? 'ck-nav-child--active' : ''}`}
+                    onClick={() => navigateTo('users')}>Users</button>
+                  <button className={`ck-nav-child ${section === 'products' ? 'ck-nav-child--active' : ''}`}
+                    onClick={() => navigateTo('products')}>Products</button>
+                </div>
+              )}
+            </div>
+
+          </nav>
+        </aside>
+
+        {/* ── MAIN CONTENT ── */}
+        <main className="ck-body">
         {/* ── ORDERS DASHBOARD ── */}
         {section === 'dashboard' && (
           <div className="fade-in">
@@ -495,13 +784,20 @@ export default function CentralKitchenHome() {
                               <span style={{ color: 'var(--text-light)' }}>₹{item.total_value.toFixed(2)}</span>
                             </div>
                           </div>
-                          <button
-                            className="ck-btn-edit"
-                            style={{ flexShrink: 0 }}
-                            onClick={() => setExpandedProductId(isExpanded ? null : item.product_id)}
-                          >
-                            {isExpanded ? 'Hide Details ▲' : 'View Details ▼'}
-                          </button>
+                          <div style={{ display: 'flex', gap: '0.5rem', flexShrink: 0 }}>
+                            <button
+                              className="ck-btn-edit"
+                              onClick={() => setExpandedProductId(isExpanded ? null : item.product_id)}
+                            >
+                              {isExpanded ? 'Hide Details ▲' : 'View Details ▼'}
+                            </button>
+                            <button
+                              className="ck-btn-plan"
+                              onClick={() => openPlanModal(item.product_id, item.product_name)}
+                            >
+                              🏭 Plan Production
+                            </button>
+                          </div>
                         </div>
 
                         {/* Per-restaurant breakdown */}
@@ -539,6 +835,134 @@ export default function CentralKitchenHome() {
                 </div>
               </>
             )}
+          </div>
+        )}
+
+        {/* ── PLAN PRODUCTION MODAL OVERLAY ── */}
+        {showPlanModal && (
+          <div className="plan-overlay" onClick={() => setShowPlanModal(false)}>
+            <div className="plan-modal" onClick={e => e.stopPropagation()}>
+              <div className="plan-modal-header">
+                <h3>🏭 Plan Production — {planningProductName}</h3>
+                <button className="inv-modal-close" onClick={() => setShowPlanModal(false)}>✕</button>
+              </div>
+              <div className="plan-modal-body">
+                {/* Buffer & Preview trigger */}
+                <div className="plan-buffer-row">
+                  <label className="plan-label">Production Buffer Quantity</label>
+                  <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center' }}>
+                    <input className="plan-input" type="number" min="0" step="1" value={planBufferQty}
+                      onChange={e => setPlanBufferQty(e.target.value)}
+                      placeholder="e.g. 15" style={{ width: '100px' }} />
+                    <button className="ck-btn-add" onClick={runPreview} disabled={planPreviewLoading}>
+                      {planPreviewLoading ? '⟳ Calculating…' : '📊 Calculate Plan'}
+                    </button>
+                  </div>
+                </div>
+
+                {planPreviewError && <div className="plan-error">{planPreviewError}</div>}
+                {planSaveSuccess && <div className="plan-success">{planSaveSuccess}</div>}
+
+                {planPreview && (
+                  <>
+                    {/* ── Restaurant Demand ── */}
+                    <div className="plan-section-title">🏪 Restaurant Demand Breakdown</div>
+                    <div className="plan-restaurant-grid">
+                      {planPreview.restaurant_demand.map((r, i) => (
+                        <div key={i} className="plan-restaurant-card">
+                          <div className="plan-restaurant-name">{r.restaurant_name}</div>
+                          <div className="plan-restaurant-qty">{r.quantity} <span className="plan-unit">{planPreview.raw_material_requirements[0]?.unit_symbol || 'dishes'}</span></div>
+                        </div>
+                      ))}
+                    </div>
+
+                    {/* ── Production Calculation ── */}
+                    <div className="plan-section-title">📐 Production Calculation</div>
+                    <div className="plan-calc-row">
+                      <div className="plan-calc-box plan-calc-blue">
+                        <div className="plan-calc-label">Total Demand</div>
+                        <div className="plan-calc-value">{planPreview.total_demand}</div>
+                      </div>
+                      <div className="plan-calc-op">+</div>
+                      <div className="plan-calc-box plan-calc-amber">
+                        <div className="plan-calc-label">Buffer</div>
+                        <div className="plan-calc-value">{planPreview.buffer_qty}</div>
+                      </div>
+                      <div className="plan-calc-op">−</div>
+                      <div className="plan-calc-box plan-calc-teal">
+                        <div className="plan-calc-label">Finished Stock</div>
+                        <div className="plan-calc-value">{planPreview.finished_stock}</div>
+                      </div>
+                      <div className="plan-calc-op">=</div>
+                      <div className="plan-calc-box plan-calc-green">
+                        <div className="plan-calc-label">Required Production</div>
+                        <div className="plan-calc-value plan-calc-main">{planPreview.required_qty}</div>
+                      </div>
+                    </div>
+
+                    {/* ── Material Summary Badge ── */}
+                    {planPreview.has_recipe && (
+                      <div className="plan-summary-row">
+                        <span className="plan-summary-badge plan-summary-ok">✓ {planPreview.summary.available} Materials Available</span>
+                        {planPreview.summary.short > 0 && <span className="plan-summary-badge plan-summary-short">⚠ {planPreview.summary.short} Materials Short</span>}
+                      </div>
+                    )}
+
+                    {/* ── Raw Material Requirements ── */}
+                    {planPreview.has_recipe ? (
+                      <>
+                        <div className="plan-section-title">🧪 Raw Material Requirements (FEFO Allocation)</div>
+                        <div className="plan-rm-table">
+                          <div className="plan-rm-head">
+                            <span>Material</span><span>Required</span><span>Available</span><span>Status</span><span>FEFO Batches</span>
+                          </div>
+                          {planPreview.raw_material_requirements.map((rm) => (
+                            <div key={rm.raw_material_id}>
+                              <div className={`plan-rm-row ${rm.status === 'short' ? 'plan-rm-row--short' : 'plan-rm-row--ok'}`}
+                                onClick={() => setExpandedRMId(expandedRMId === rm.raw_material_id ? null : rm.raw_material_id)}
+                                style={{ cursor: 'pointer' }}>
+                                <span><strong>{rm.raw_material_name}</strong></span>
+                                <span>{rm.required_qty.toFixed(2)} {rm.unit_symbol}</span>
+                                <span>{rm.available_qty.toFixed(2)} {rm.unit_symbol}</span>
+                                <span>
+                                  {rm.status === 'short'
+                                    ? <span className="plan-short-badge">⚠ Short by {rm.shortage.toFixed(2)} {rm.unit_symbol}</span>
+                                    : <span className="plan-ok-badge">✓ Enough</span>}
+                                </span>
+                                <span style={{ fontSize: '0.75rem', color: 'var(--text-light)' }}>
+                                  {rm.fefo_allocations.length} batch(es) {expandedRMId === rm.raw_material_id ? '▲' : '▼'}
+                                </span>
+                              </div>
+                              {expandedRMId === rm.raw_material_id && rm.fefo_allocations.length > 0 && (
+                                <div className="plan-fefo-list fade-in">
+                                  {rm.fefo_allocations.map((a, ai) => (
+                                    <div key={ai} className="plan-fefo-row">
+                                      <span>Batch #{a.batch_no || a.batch_id}</span>
+                                      <span>Expires: {a.expiry_date ? new Date(a.expiry_date).toLocaleDateString('en-IN') : 'No expiry'}</span>
+                                      <span className="plan-fefo-alloc">Allocate: {a.allocated_qty.toFixed(2)} {rm.unit_symbol}</span>
+                                    </div>
+                                  ))}
+                                </div>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      </>
+                    ) : (
+                      <div className="plan-no-recipe">⚠️ No active recipe/BOM configured for this product. Set up a recipe under the Products tab first.</div>
+                    )}
+                  </>
+                )}
+              </div>
+              <div className="plan-modal-footer">
+                <button className="ck-btn-cancel-sm" onClick={() => setShowPlanModal(false)}>Close</button>
+                {planPreview && planPreview.has_recipe && !planSaveSuccess && (
+                  <button className="ck-btn-add" onClick={saveDraftPlan} disabled={savingPlan}>
+                    {savingPlan ? 'Saving…' : '💾 Save Draft Plan'}
+                  </button>
+                )}
+              </div>
+            </div>
           </div>
         )}
 
@@ -1228,7 +1652,365 @@ export default function CentralKitchenHome() {
             )}
           </div>
         )}
+        {/* ── PRODUCTION PLANS TAB ── */}
+        {section === 'production' && (
+          <div className="fade-in">
+            {planActionMsg && <div className={`inv-toast ${planActionMsg.startsWith('Error') ? 'inv-toast--error' : 'inv-toast--success'}`}>{planActionMsg}</div>}
+            <div className="ck-section-header" style={{ marginBottom: '1.25rem' }}>
+              <h2 className="ck-section-title">🏭 Production Plans</h2>
+              <button className="ck-btn-add" style={{ background: 'none', border: '1px solid var(--border)', color: 'var(--text-light)' }} onClick={fetchProductionPlans}>↻ Refresh</button>
+            </div>
+
+            {selectedPlan ? (
+              <div className="fade-in">
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '1.5rem' }}>
+                  <button className="inv-btn-back" onClick={() => setSelectedPlan(null)}>← Back to Plans</button>
+                  <h3 style={{ margin: 0, fontSize: '1.1rem' }}>Plan #{selectedPlan.id} — {selectedPlan.items[0]?.product.product_name}</h3>
+                  <span className={`plan-status-badge plan-status-${selectedPlan.status}`}>{selectedPlan.status.replace(/_/g, ' ').toUpperCase()}</span>
+                </div>
+
+                {/* Plan Summary Stats */}
+                {selectedPlan.items.map(item => (
+                  <div key={item.id} className="plan-detail-stats">
+                    <div className="plan-detail-stat"><div className="plan-detail-val">{Number(item.total_orders_qty)}</div><div className="plan-detail-lbl">Total Demand</div></div>
+                    <div className="plan-detail-stat"><div className="plan-detail-val">{Number(item.buffer_qty)}</div><div className="plan-detail-lbl">Buffer</div></div>
+                    <div className="plan-detail-stat"><div className="plan-detail-val">{Number(item.current_stock_qty)}</div><div className="plan-detail-lbl">Finished Stock</div></div>
+                    <div className="plan-detail-stat plan-detail-stat--highlight"><div className="plan-detail-val">{Number(item.production_qty)}</div><div className="plan-detail-lbl">Required Production</div></div>
+                  </div>
+                ))}
+
+                {/* Raw Material Requirements */}
+                <div className="plan-section-title" style={{ marginTop: '1.5rem' }}>🧪 Raw Material Requirements</div>
+                <div className="plan-rm-table">
+                  <div className="plan-rm-head"><span>Material</span><span>Required</span><span>Available</span><span>To Purchase</span><span>Status</span></div>
+                  {selectedPlan.requirements.map(req => (
+                    <div key={req.id} className={`plan-rm-row ${Number(req.purchase_needed_qty) > 0 ? 'plan-rm-row--short' : 'plan-rm-row--ok'}`}>
+                      <span><strong>{req.rawMaterial.name}</strong></span>
+                      <span>{Number(req.required_qty).toFixed(2)} {req.rawMaterial.unit?.symbol || ''}</span>
+                      <span>{Number(req.available_qty).toFixed(2)} {req.rawMaterial.unit?.symbol || ''}</span>
+                      <span>{Number(req.purchase_needed_qty) > 0 ? <span className="plan-short-badge">Buy {Number(req.purchase_needed_qty).toFixed(2)}</span> : '—'}</span>
+                      <span>{Number(req.purchase_needed_qty) > 0 ? <span className="plan-short-badge">Short</span> : <span className="plan-ok-badge">Enough</span>}</span>
+                    </div>
+                  ))}
+                </div>
+
+                {/* Actions */}
+                <div className="plan-action-bar">
+                  {selectedPlan.status === 'draft' && (
+                    <button className="ck-btn-plan" disabled={planActionLoading}
+                      onClick={() => handlePlanAction(selectedPlan.id, 'material-request')}>
+                      {planActionLoading ? '...' : '📋 Generate Material Request'}
+                    </button>
+                  )}
+                  {selectedPlan.status === 'material_check_completed' && (
+                    <button className="ck-btn-plan" disabled={planActionLoading}
+                      onClick={() => handlePlanAction(selectedPlan.id, 'mark-ready')}>
+                      {planActionLoading ? '...' : '✅ Check & Mark Ready'}
+                    </button>
+                  )}
+                  {selectedPlan.status === 'ready_for_production' && (
+                    <button className="plan-start-btn" disabled={planActionLoading}
+                      onClick={() => handlePlanAction(selectedPlan.id, 'start')}>
+                      {planActionLoading ? '⟳ Starting...' : '▶ Start Production'}
+                    </button>
+                  )}
+                </div>
+                <div style={{ fontSize: '0.75rem', color: 'var(--text-light)', marginTop: '0.5rem' }}>
+                  Created: {new Date(selectedPlan.created_at).toLocaleString('en-IN')} by {selectedPlan.createdBy?.name || '—'}
+                </div>
+              </div>
+            ) : (
+              <div className="ck-list">
+                {productionPlans.length === 0
+                  ? <div className="ck-empty">No production plans yet. Go to the Orders tab and click "Plan Production" on a product.</div>
+                  : productionPlans.map(plan => (
+                    <div key={plan.id} className="ck-list-item" style={{ cursor: 'pointer' }} onClick={() => setSelectedPlan(plan)}>
+                      <div className="ck-list-item-main">
+                        <div className="ck-list-item-title">
+                          Plan #{plan.id} — {plan.items[0]?.product.product_name || 'Unknown Product'}
+                          <span className={`plan-status-badge plan-status-${plan.status}`} style={{ marginLeft: '0.75rem' }}>
+                            {plan.status.replace(/_/g, ' ').toUpperCase()}
+                          </span>
+                        </div>
+                        <div className="ck-list-item-meta">
+                          <span>📅 {new Date(plan.plan_date).toLocaleDateString('en-IN')}</span>
+                          {plan.items[0] && <span>🍳 Produce: <strong>{Number(plan.items[0].production_qty)}</strong> {plan.items[0].product.unit?.symbol || 'units'}</span>}
+                          <span>👤 {plan.createdBy?.name || '—'}</span>
+                          <span>{plan.requirements.filter(r => Number(r.purchase_needed_qty) > 0).length} shortage(s)</span>
+                        </div>
+                      </div>
+                      <div className="ck-list-item-actions">
+                        <button className="ck-btn-edit">View →</button>
+                      </div>
+                    </div>
+                  ))
+                }
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* ── PURCHASE TAB ── */}
+        {section === 'purchase' && (
+          <div className="fade-in">
+            {purchaseMsg && <div className="inv-toast inv-toast--success">{purchaseMsg}</div>}
+            {purchaseErr && <div className="inv-toast inv-toast--error">{purchaseErr}</div>}
+
+            <div className="ck-section-header" style={{ marginBottom: '1.25rem' }}>
+              <h2 className="ck-section-title">🛒 Purchase Management</h2>
+              <button className="ck-btn-add" style={{ background: 'none', border: '1px solid var(--border)', color: 'var(--text-light)' }} onClick={fetchPurchaseData}>↻ Refresh</button>
+            </div>
+
+            {/* Sub-tabs */}
+            <div className="inv-detail-tabs" style={{ marginBottom: '1.5rem' }}>
+              {(['requests', 'orders', 'vendors'] as const).map(t => (
+                <button key={t} className={`inv-detail-tab ${purchaseSubTab === t ? 'inv-detail-tab--active' : ''}`} onClick={() => setPurchaseSubTab(t)}>
+                  {t === 'requests' ? '📋 Material Requests' : t === 'orders' ? '📦 Purchase Orders' : '🏢 Vendors'}
+                </button>
+              ))}
+            </div>
+
+            {/* Material Requests */}
+            {purchaseSubTab === 'requests' && (
+              <div className="ck-list">
+                {purchaseRequests.length === 0
+                  ? <div className="ck-empty">No material requests yet. Requests are created from Production Plans when shortages exist.</div>
+                  : purchaseRequests.map(req => (
+                    <div key={req.id} className="ck-list-item">
+                      <div className="ck-list-item-main">
+                        <div className="ck-list-item-title">
+                          {req.requirement.rawMaterial.name}
+                          <span className={`plan-status-badge plan-status-${req.status}`} style={{ marginLeft: '0.75rem' }}>{req.status.toUpperCase()}</span>
+                        </div>
+                        <div className="ck-list-item-meta">
+                          <span>📋 {req.request_number}</span>
+                          <span>Needed: <strong>{Number(req.requirement.purchase_needed_qty).toFixed(2)} {req.requirement.rawMaterial.unit?.symbol || ''}</strong></span>
+                          <span>For: {req.requirement.plan.items[0]?.product.product_name || '—'}</span>
+                          <span>{new Date(req.created_at).toLocaleDateString('en-IN')}</span>
+                        </div>
+                        {req.purchaseOrders.length > 0 && (
+                          <div className="ck-list-item-meta" style={{ marginTop: '0.25rem' }}>
+                            {req.purchaseOrders.map(po => (
+                              <span key={po.id} style={{ background: '#e3f2fd', color: '#1565c0', padding: '0.1rem 0.5rem', borderRadius: '999px', fontSize: '0.7rem' }}>PO: {po.po_number} ({po.status})</span>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                      <div className="ck-list-item-actions">
+                        {req.status === 'pending' && (
+                          <>
+                            <button className="ck-btn-plan" onClick={() => { setApproveModal(req); setApproveForm({ vendor_id: '', unit_price: '', modified_qty: String(Number(req.requirement.purchase_needed_qty).toFixed(2)), expected_delivery_date: '' }); }}>✓ Approve & Create PO</button>
+                            <button className="ck-btn-delete" onClick={async () => { await axios.post(`${API}/purchase/requests/${req.id}/reject`, {}, { headers: authHeader }); fetchPurchaseData(); }}>✗ Reject</button>
+                          </>
+                        )}
+                      </div>
+                    </div>
+                  ))
+                }
+              </div>
+            )}
+
+            {/* Purchase Orders */}
+            {purchaseSubTab === 'orders' && (
+              <div className="ck-list">
+                {purchaseOrders.length === 0
+                  ? <div className="ck-empty">No purchase orders yet.</div>
+                  : purchaseOrders.map(po => (
+                    <div key={po.id} className="ck-list-item" style={{ flexDirection: 'column', gap: '0.5rem' }}>
+                      <div style={{ display: 'flex', width: '100%', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <div className="ck-list-item-main">
+                          <div className="ck-list-item-title">
+                            {po.po_number}
+                            <span className={`plan-status-badge plan-status-${po.status}`} style={{ marginLeft: '0.75rem' }}>{po.status.toUpperCase()}</span>
+                          </div>
+                          <div className="ck-list-item-meta">
+                            <span>🏢 {po.vendor.name}</span>
+                            <span>₹{Number(po.total_amount).toFixed(2)}</span>
+                            <span>{new Date(po.created_at).toLocaleDateString('en-IN')}</span>
+                            <span>By: {po.createdBy?.name || '—'}</span>
+                          </div>
+                          <div style={{ marginTop: '0.5rem' }}>
+                            {po.items.map(item => (
+                              <span key={item.id} style={{ fontSize: '0.75rem', marginRight: '0.75rem' }}>
+                                {item.rawMaterial.name}: {Number(item.ordered_qty).toFixed(2)} {item.rawMaterial.unit?.symbol || ''}
+                                (Received: {Number(item.received_qty).toFixed(2)})
+                              </span>
+                            ))}
+                          </div>
+                        </div>
+                        {po.status !== 'received' && (
+                          <button className="ck-btn-plan" onClick={() => openGrnModal(po)}>📦 Receive Stock (GRN)</button>
+                        )}
+                      </div>
+                    </div>
+                  ))
+                }
+              </div>
+            )}
+
+            {/* Vendors */}
+            {purchaseSubTab === 'vendors' && (
+              <div className="fade-in">
+                <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '1rem' }}>
+                  <button className="ck-btn-add" onClick={() => { setVendorForm({ name: '', contact_number: '', gst_number: '', payment_terms: '', address: '' }); setShowVendorForm(true); }}>+ Add Vendor</button>
+                </div>
+                <div className="ck-list">
+                  {vendors.length === 0
+                    ? <div className="ck-empty">No vendors yet. Add vendors to assign when approving purchase requests.</div>
+                    : vendors.map(v => (
+                      <div key={v.id} className="ck-list-item">
+                        <div className="ck-list-item-main">
+                          <div className="ck-list-item-title">{v.name}</div>
+                          <div className="ck-list-item-meta">{v.contact_number && <span>📞 {v.contact_number}</span>}</div>
+                        </div>
+                      </div>
+                    ))
+                  }
+                </div>
+              </div>
+            )}
+
+            {/* Approve Request Modal */}
+            {approveModal && (
+              <div className="plan-overlay" onClick={() => setApproveModal(null)}>
+                <div className="plan-modal" onClick={e => e.stopPropagation()} style={{ maxWidth: '500px' }}>
+                  <div className="plan-modal-header">
+                    <h3>✓ Approve Purchase Request</h3>
+                    <button className="inv-modal-close" onClick={() => setApproveModal(null)}>✕</button>
+                  </div>
+                  <div className="plan-modal-body">
+                    <p style={{ margin: '0 0 1rem', color: 'var(--text-light)', fontSize: '0.9rem' }}>
+                      Material: <strong>{approveModal.requirement.rawMaterial.name}</strong> — Needed: <strong>{Number(approveModal.requirement.purchase_needed_qty).toFixed(2)} {approveModal.requirement.rawMaterial.unit?.symbol || ''}</strong>
+                    </p>
+                    <div className="plan-buffer-row">
+                      <label className="plan-label">Vendor *</label>
+                      <select className="ck-select" style={{ marginTop: '0.25rem' }} value={approveForm.vendor_id} onChange={e => setApproveForm(f => ({ ...f, vendor_id: e.target.value }))}>
+                        <option value="">— Select Vendor —</option>
+                        {vendors.map(v => <option key={v.id} value={v.id}>{v.name}</option>)}
+                      </select>
+                    </div>
+                    <div className="plan-buffer-row">
+                      <label className="plan-label">Quantity to Purchase</label>
+                      <input className="plan-input" type="number" step="0.01" value={approveForm.modified_qty} onChange={e => setApproveForm(f => ({ ...f, modified_qty: e.target.value }))} />
+                    </div>
+                    <div className="plan-buffer-row">
+                      <label className="plan-label">Unit Price (₹) *</label>
+                      <input className="plan-input" type="number" step="0.01" value={approveForm.unit_price} onChange={e => setApproveForm(f => ({ ...f, unit_price: e.target.value }))} />
+                    </div>
+                    <div className="plan-buffer-row">
+                      <label className="plan-label">Expected Delivery Date</label>
+                      <input className="plan-input" type="date" value={approveForm.expected_delivery_date} onChange={e => setApproveForm(f => ({ ...f, expected_delivery_date: e.target.value }))} />
+                    </div>
+                    {purchaseErr && <div className="plan-error">{purchaseErr}</div>}
+                  </div>
+                  <div className="plan-modal-footer">
+                    <button className="ck-btn-cancel-sm" onClick={() => setApproveModal(null)}>Cancel</button>
+                    <button className="ck-btn-add" disabled={planActionLoading || !approveForm.vendor_id || !approveForm.unit_price}
+                      onClick={async () => {
+                        setPlanActionLoading(true);
+                        setPurchaseErr('');
+                        try {
+                          await axios.post(`${API}/purchase/requests/${approveModal.id}/approve`, approveForm, { headers: authHeader });
+                          setApproveModal(null);
+                          setPurchaseMsg('✓ Purchase Order created!');
+                          await fetchPurchaseData();
+                          setTimeout(() => setPurchaseMsg(''), 4000);
+                        } catch (err: any) {
+                          setPurchaseErr(err.response?.data?.message ?? 'Approval failed');
+                        } finally { setPlanActionLoading(false); }
+                      }}>
+                      {planActionLoading ? '...' : '✓ Approve & Create PO'}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* GRN Modal */}
+            {grnModal && (
+              <div className="plan-overlay" onClick={() => setGrnModal(null)}>
+                <div className="plan-modal" onClick={e => e.stopPropagation()} style={{ maxWidth: '600px' }}>
+                  <div className="plan-modal-header">
+                    <h3>📦 Receive Goods — {grnModal.po_number}</h3>
+                    <button className="inv-modal-close" onClick={() => setGrnModal(null)}>✕</button>
+                  </div>
+                  <div className="plan-modal-body">
+                    <p style={{ margin: '0 0 1rem', fontSize: '0.85rem', color: 'var(--text-light)' }}>Vendor: {grnModal.vendor.name} — Fill in the received batch details below.</p>
+                    {grnForm.map((item, idx) => (
+                      <div key={idx} style={{ borderBottom: '1px solid var(--border)', paddingBottom: '1rem', marginBottom: '1rem' }}>
+                        <div style={{ fontWeight: 600, marginBottom: '0.5rem' }}>{item.name}</div>
+                        <div className="ck-form-grid">
+                          <div className="ck-field">
+                            <label>Qty to Receive *</label>
+                            <input className="ck-input" type="number" step="0.01" value={item.received_qty}
+                              onChange={e => { const f = [...grnForm]; f[idx].received_qty = e.target.value; setGrnForm(f); }} />
+                          </div>
+                          <div className="ck-field">
+                            <label>Batch No</label>
+                            <input className="ck-input" value={item.batch_no} placeholder="Auto if blank"
+                              onChange={e => { const f = [...grnForm]; f[idx].batch_no = e.target.value; setGrnForm(f); }} />
+                          </div>
+                          <div className="ck-field">
+                            <label>Expiry Date</label>
+                            <input className="ck-input" type="date" value={item.expiry_date}
+                              onChange={e => { const f = [...grnForm]; f[idx].expiry_date = e.target.value; setGrnForm(f); }} />
+                          </div>
+                          <div className="ck-field">
+                            <label>Purchase Price/unit (₹)</label>
+                            <input className="ck-input" type="number" step="0.01" value={item.purchase_price}
+                              onChange={e => { const f = [...grnForm]; f[idx].purchase_price = e.target.value; setGrnForm(f); }} />
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                    {purchaseErr && <div className="plan-error">{purchaseErr}</div>}
+                  </div>
+                  <div className="plan-modal-footer">
+                    <button className="ck-btn-cancel-sm" onClick={() => setGrnModal(null)}>Cancel</button>
+                    <button className="ck-btn-add" disabled={planActionLoading} onClick={submitGRN}>
+                      {planActionLoading ? '...' : '✓ Confirm Receipt & Update Inventory'}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Add Vendor Modal */}
+            {showVendorForm && (
+              <div className="plan-overlay" onClick={() => setShowVendorForm(false)}>
+                <div className="plan-modal" onClick={e => e.stopPropagation()} style={{ maxWidth: '450px' }}>
+                  <div className="plan-modal-header">
+                    <h3>🏢 Add Vendor</h3>
+                    <button className="inv-modal-close" onClick={() => setShowVendorForm(false)}>✕</button>
+                  </div>
+                  <div className="plan-modal-body">
+                    <div className="ck-form-grid">
+                      <div className="ck-field ck-field--full"><label>Vendor Name *</label><input className="ck-input" required value={vendorForm.name} onChange={e => setVendorForm(f => ({ ...f, name: e.target.value }))} /></div>
+                      <div className="ck-field"><label>Contact Number</label><input className="ck-input" value={vendorForm.contact_number} onChange={e => setVendorForm(f => ({ ...f, contact_number: e.target.value }))} /></div>
+                      <div className="ck-field"><label>GST Number</label><input className="ck-input" value={vendorForm.gst_number} onChange={e => setVendorForm(f => ({ ...f, gst_number: e.target.value }))} /></div>
+                      <div className="ck-field"><label>Payment Terms</label><input className="ck-input" value={vendorForm.payment_terms} onChange={e => setVendorForm(f => ({ ...f, payment_terms: e.target.value }))} /></div>
+                      <div className="ck-field ck-field--full"><label>Address</label><input className="ck-input" value={vendorForm.address} onChange={e => setVendorForm(f => ({ ...f, address: e.target.value }))} /></div>
+                    </div>
+                  </div>
+                  <div className="plan-modal-footer">
+                    <button className="ck-btn-cancel-sm" onClick={() => setShowVendorForm(false)}>Cancel</button>
+                    <button className="ck-btn-add" onClick={async () => {
+                      try {
+                        await axios.post(`${API}/purchase/vendors`, vendorForm, { headers: authHeader });
+                        setShowVendorForm(false);
+                        await fetchPurchaseData();
+                        setPurchaseMsg('✓ Vendor added!');
+                        setTimeout(() => setPurchaseMsg(''), 3000);
+                      } catch (err: any) { setPurchaseErr(err.response?.data?.message ?? 'Failed'); }
+                    }}>Save Vendor</button>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
       </main>
+      </div>{/* end ck-layout */}
     </div>
   );
 }

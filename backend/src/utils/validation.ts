@@ -1,7 +1,7 @@
 import { z } from 'zod';
 
 export const loginSchema = z.object({
-  tenant_id: z.coerce.number(),
+  tenant_id: z.coerce.number().nullable(),
   email_or_mobile: z.string().min(1, 'Email or Mobile is required'),
   password: z.string().min(6, 'Password must be at least 6 characters'),
 });

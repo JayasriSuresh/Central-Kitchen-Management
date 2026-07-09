@@ -101,7 +101,7 @@ model UserRole {
 model User {
   id                 Int       @id @default(autoincrement())
   user_id            String    @unique
-  tenant_id          Int
+  tenant_id          Int?
   restaurant_id      Int?
   name               String
   username           String
@@ -121,7 +121,7 @@ model User {
   updated_at         DateTime  @updatedAt
   deleted_at         DateTime?
 
-  tenant           Tenant            @relation(fields: [tenant_id], references: [id])
+  tenant           Tenant?           @relation(fields: [tenant_id], references: [id])
   primaryRole      Role              @relation("PrimaryRole", fields: [primary_role_id], references: [id])
   restaurantTenant RestaurantTenant? @relation(fields: [tenant_id, restaurant_id], references: [tenant_id, restaurant_id])
 

@@ -29,3 +29,20 @@ export const requirePermission = (module: string, action: string) => {
     }
   };
 };
+
+export const requireMasterAdmin = (req: AuthRequest, res: Response, next: NextFunction) => {
+  try {
+    const user = req.user;
+    if (!user) {
+      return res.status(401).json({ message: 'Unauthorized' });
+    }
+
+    if (user.primaryRole?.code !== '00') {
+      return res.status(403).json({ message: 'Forbidden: Requires System Administrator privileges' });
+    }
+
+    next();
+  } catch (error) {
+    return res.status(500).json({ message: 'Internal Server Error' });
+  }
+};

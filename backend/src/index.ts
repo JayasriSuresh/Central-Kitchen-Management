@@ -9,6 +9,9 @@ import roleRoutes from './routes/role.routes';
 import adminRoutes from './routes/admin.routes';
 import restaurantRoutes from './routes/restaurant.routes';
 import inventoryRoutes from './routes/inventory.routes';
+import productionRoutes from './routes/production.routes';
+import purchaseRoutes from './routes/purchase.routes';
+import systemRoutes from './routes/system.routes';
 
 dotenv.config();
 
@@ -44,7 +47,9 @@ app.use('/roles', roleRoutes);
 app.use('/admin', adminRoutes);
 app.use('/restaurant', restaurantRoutes);
 app.use('/inventory', inventoryRoutes);
-// etc.
+app.use('/production', productionRoutes);
+app.use('/purchase', purchaseRoutes);
+app.use('/system', systemRoutes);
 
 app.listen(port, () => {
   console.log(`[server]: Server is running at http://localhost:${port}`);

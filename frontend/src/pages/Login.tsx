@@ -16,7 +16,7 @@ type OtpStep = 'send' | 'verify';
 
 export default function Login() {
   const [tenants, setTenants] = useState<Tenant[]>([]);
-  const [selectedTenantId, setSelectedTenantId] = useState<number | ''>('');
+  const [selectedTenantId, setSelectedTenantId] = useState<number | string>('');
   const [identifier, setIdentifier] = useState('');
 
   // Password login
@@ -42,7 +42,7 @@ export default function Login() {
         const res = await axios.get(`${API_URL}/auth/tenants`);
         setTenants(res.data.tenants);
         if (res.data.tenants.length > 0) {
-          setSelectedTenantId(res.data.tenants[0].id);
+          setSelectedTenantId(res.data.tenants[0].id === null ? 'null' : res.data.tenants[0].id);
         }
       } catch (err) {
         console.error('Failed to fetch tenants:', err);
@@ -63,12 +63,12 @@ export default function Login() {
   // ── Password login ──────────────────────────────────────────────────────────
   const handlePasswordLogin = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!selectedTenantId || !identifier || !password) return;
+    if (selectedTenantId === '' || !identifier || !password) return;
     setError('');
     setLoading(true);
     try {
       const res = await axios.post(`${API_URL}/auth/login`, {
-        tenant_id: Number(selectedTenantId),
+        tenant_id: selectedTenantId === 'null' ? null : Number(selectedTenantId),
         email_or_mobile: identifier,
         password,
       });
@@ -88,12 +88,12 @@ export default function Login() {
   // ── OTP login — step 1: send ────────────────────────────────────────────────
   const handleOtpSend = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!selectedTenantId || !identifier) return;
+    if (selectedTenantId === '' || !identifier) return;
     setError('');
     setLoading(true);
     try {
       const res = await axios.post(`${API_URL}/auth/login-otp/send`, {
-        tenant_id: Number(selectedTenantId),
+        tenant_id: selectedTenantId === 'null' ? null : Number(selectedTenantId),
         email_or_mobile: identifier,
       });
       setOtpSentMessage(res.data.message || 'A 6-digit code has been sent to your email.');
@@ -108,12 +108,12 @@ export default function Login() {
   // ── OTP login — step 2: verify ──────────────────────────────────────────────
   const handleOtpVerify = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!selectedTenantId || !identifier || otp.length < 6) return;
+    if (selectedTenantId === '' || !identifier || otp.length < 6) return;
     setError('');
     setLoading(true);
     try {
       const res = await axios.post(`${API_URL}/auth/login-otp/verify`, {
-        tenant_id: Number(selectedTenantId),
+        tenant_id: selectedTenantId === 'null' ? null : Number(selectedTenantId),
         email_or_mobile: identifier,
         otp,
       });
@@ -140,14 +140,14 @@ export default function Login() {
             id="login-tenant"
             className="login-select"
             value={selectedTenantId}
-            onChange={(e) => setSelectedTenantId(Number(e.target.value))}
+            onChange={(e) => setSelectedTenantId(e.target.value === 'null' ? 'null' : Number(e.target.value))}
             required
           >
             {tenants.length === 0 ? (
               <option value="" disabled>Loading kitchens...</option>
             ) : (
               tenants.map((t) => (
-                <option key={t.id} value={t.id}>{t.name}</option>
+                <option key={t.id ?? 'sys'} value={t.id === null ? 'null' : t.id}>{t.name}</option>
               ))
             )}
           </select>

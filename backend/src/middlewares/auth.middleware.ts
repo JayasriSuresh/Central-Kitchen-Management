@@ -44,7 +44,7 @@ export const authMiddleware = async (req: AuthRequest, res: Response, next: Next
     }
 
     req.user = user;
-    req.tenantId = user.tenant_id;
+    req.tenantId = user.tenant_id ?? undefined;
     next();
   } catch (error) {
     console.error('Auth Error:', error);

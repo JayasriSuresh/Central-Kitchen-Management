@@ -57,7 +57,10 @@ export const resolveTenant = async (req: Request, res: Response) => {
 
     if (users.length === 0) return res.status(404).json({ message: 'User not found' });
 
-    const tenants = users.map((u) => ({ id: u.tenant.id, name: u.tenant.name, code: u.tenant.code }));
+    const tenants = users.map((u) => {
+      if (!u.tenant) return { id: null, name: 'System Administration', code: 'SYS' };
+      return { id: u.tenant.id, name: u.tenant.name, code: u.tenant.code };
+    });
     return res.status(200).json({ tenants });
   } catch (error: any) {
     return res.status(400).json({ message: error.message });
@@ -72,11 +75,12 @@ export const login = async (req: Request, res: Response) => {
 
     const user = await prisma.user.findFirst({
       where: {
-        tenant_id,
         OR: [
-          { email: email_or_mobile },
-          { mobile: email_or_mobile },
-          { username: email_or_mobile },
+          { tenant_id: tenant_id === null ? null : tenant_id },
+          { tenant_id: null }
+        ],
+        AND: [
+          { OR: [{ email: email_or_mobile }, { mobile: email_or_mobile }, { username: email_or_mobile }] }
         ],
         deleted_at: null,
       },
@@ -85,7 +89,7 @@ export const login = async (req: Request, res: Response) => {
 
     if (!user) {
       // Avoid foreign key violation if tenant_id does not exist
-      const tenantExists = await prisma.tenant.findUnique({ where: { id: tenant_id } });
+      const tenantExists = tenant_id ? await prisma.tenant.findUnique({ where: { id: tenant_id } }) : false;
       await prisma.loginAttempt.create({
         data: {
           tenant_id: tenantExists ? tenant_id : null,
@@ -335,11 +339,16 @@ export const revokeSession = async (req: Request, res: Response) => {
 const OTP_TTL_MS = 10 * 60 * 1000;
 const generateOtp = () => String(Math.floor(100000 + Math.random() * 900000));
 
-const findUserByIdentifier = (tenant_id: number, email_or_mobile: string) =>
+const findUserByIdentifier = (tenant_id: number | null, email_or_mobile: string) =>
   prisma.user.findFirst({
     where: {
-      tenant_id,
-      OR: [{ email: email_or_mobile }, { mobile: email_or_mobile }, { username: email_or_mobile }],
+      OR: [
+        { tenant_id: tenant_id === null ? null : tenant_id },
+        { tenant_id: null }
+      ],
+      AND: [
+        { OR: [{ email: email_or_mobile }, { mobile: email_or_mobile }, { username: email_or_mobile }] }
+      ],
       deleted_at: null,
     },
   });
@@ -405,7 +414,7 @@ export const forgotPassword = async (req: Request, res: Response) => {
       return res.status(400).json({ message: 'tenant_id and email_or_mobile are required.' });
     }
 
-    const user = await findUserByIdentifier(Number(tenant_id), String(email_or_mobile));
+    const user = await findUserByIdentifier(tenant_id === null ? null : Number(tenant_id), String(email_or_mobile));
     if (user) {
       const otp = generateOtp();
       await prisma.otpCode.updateMany({
