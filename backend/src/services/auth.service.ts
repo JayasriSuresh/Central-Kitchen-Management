@@ -19,7 +19,7 @@ export const generateTokens = async (
   userId: number,
   tenantId: number | null,
   activeWorkspace?: {
-    type: 'central_kitchen' | 'restaurant';
+    type: string;
     restaurantId?: number | null;
     roleId: number;
   },
@@ -27,7 +27,28 @@ export const generateTokens = async (
   ipAddress?: string,
   deviceName?: string,
 ) => {
-  const accessToken = jwt.sign({ userId, tenantId, activeWorkspace }, JWT_SECRET, { expiresIn: '15m' });
+  // Embed permission codes in JWT so middleware never hits the DB for auth checks
+  let permissionCodes: string[] = [];
+  if (activeWorkspace?.roleId) {
+    const rolePerms = await prisma.rolePermission.findMany({
+      where: { role_id: activeWorkspace.roleId },
+      include: { permission: { select: { code: true } } },
+    });
+    permissionCodes = rolePerms.map((rp) => rp.permission.code);
+
+    // Also check if this role is super_admin / is_super_admin
+    const role = await prisma.role.findUnique({
+      where: { id: activeWorkspace.roleId },
+      select: { is_super_admin: true, code: true },
+    });
+    if (role?.is_super_admin) permissionCodes = ['*'];
+  }
+
+  const accessToken = jwt.sign(
+    { userId, tenantId, activeWorkspace, permissionCodes },
+    JWT_SECRET,
+    { expiresIn: '15m' },
+  );
   const refreshToken = crypto.randomBytes(64).toString('hex');
 
   const expiresAt = new Date();
@@ -47,13 +68,13 @@ export const generateTokens = async (
     },
   });
 
-  return { accessToken, refreshToken };
+  return { accessToken, refreshToken, permissionCodes };
 };
 
 export const rotateRefreshToken = async (
   incomingToken: string,
   activeWorkspace?: {
-    type: 'central_kitchen' | 'restaurant';
+    type: string;
     restaurantId?: number | null;
     roleId: number;
   },

@@ -47,13 +47,29 @@ interface Order {
 type Tab = 'new-order' | 'history' | 'roles';
 
 export default function RestaurantHome() {
-  const { user, accessToken, logout, activePortal, workspaces, setAuth } = useAuth();
+  const { user, accessToken, logout, activePortal, workspaces, setAuth, hasPermission } = useAuth();
   const navigate = useNavigate();
 
   const [tab, setTab] = useState<Tab>('new-order');
   const [products, setProducts] = useState<Product[]>([]);
   const [orders, setOrders] = useState<Order[]>([]);
   const [showUserMenu, setShowUserMenu] = useState(false);
+
+  const allowedTabs = {
+    'new-order': hasPermission('RESTAURANT_ORDER_MGMT_CREATE'),
+    history: hasPermission('RESTAURANT_ORDER_MGMT_VIEW'),
+    roles: hasPermission('LOGIN_USER_MGMT_VIEW'),
+  };
+
+  useEffect(() => {
+    const orderOfTabs: Tab[] = ['new-order', 'history', 'roles'];
+    if (!allowedTabs[tab]) {
+      const firstAllowed = orderOfTabs.find(t => allowedTabs[t]);
+      if (firstAllowed) {
+        setTab(firstAllowed);
+      }
+    }
+  }, [tab, allowedTabs]);
 
   const handleSwitchWorkspace = async (ws: any) => {
     try {
@@ -69,9 +85,10 @@ export default function RestaurantHome() {
         accessToken: res.data.accessToken,
         activePortal: ws.type,
         workspaces: res.data.workspaces,
+        permissionCodes: res.data.permissionCodes,
       });
       setShowUserMenu(false);
-      
+
       if (ws.type === 'system') navigate('/system');
       else if (ws.type === 'restaurant') navigate('/restaurant');
       else navigate('/central-kitchen');
@@ -288,24 +305,30 @@ export default function RestaurantHome() {
 
       {/* Tabs */}
       <div className="ck-tabs">
-        <button
-          className={`ck-tab ${tab === 'new-order' ? 'ck-tab--active' : ''}`}
-          onClick={() => setTab('new-order')}
-        >
-          🛘 Place Order
-        </button>
-        <button
-          className={`ck-tab ${tab === 'history' ? 'ck-tab--active' : ''}`}
-          onClick={() => setTab('history')}
-        >
-          📋 Order History ({orders.length})
-        </button>
-        <button
-          className={`ck-tab ${tab === 'roles' ? 'ck-tab--active' : ''}`}
-          onClick={() => { setTab('roles'); loadRolesData(); }}
-        >
-          🔐 Roles
-        </button>
+        {allowedTabs['new-order'] && (
+          <button
+            className={`ck-tab ${tab === 'new-order' ? 'ck-tab--active' : ''}`}
+            onClick={() => setTab('new-order')}
+          >
+            🛘 Place Order
+          </button>
+        )}
+        {allowedTabs['history'] && (
+          <button
+            className={`ck-tab ${tab === 'history' ? 'ck-tab--active' : ''}`}
+            onClick={() => setTab('history')}
+          >
+            📋 Order History ({orders.length})
+          </button>
+        )}
+        {allowedTabs['roles'] && (
+          <button
+            className={`ck-tab ${tab === 'roles' ? 'ck-tab--active' : ''}`}
+            onClick={() => { setTab('roles'); loadRolesData(); }}
+          >
+            🔐 Roles
+          </button>
+        )}
       </div>
 
       <main className="ck-body">
@@ -337,7 +360,7 @@ export default function RestaurantHome() {
                           <span className="ck-cat-badge">{p.category_name}</span>
                         </div>
                         <div className="ck-list-item-meta" style={{ fontSize: '0.75rem' }}>
-                          <span>₹{Number(p.selling_price).toFixed(2)} / {p.unit_name}</span>
+                          <span>£{Number(p.selling_price).toFixed(2)} / {p.unit_name}</span>
                           {p.moq && <span>MOQ: {p.moq}</span>}
                           {p.shelf_life_days && <span>Shelf Life: {p.shelf_life_days} days</span>}
                           {!p.allow_urgent_order && <span style={{ color: 'var(--error)' }}>No Urgent Orders</span>}
@@ -396,7 +419,7 @@ export default function RestaurantHome() {
                     {cartItems.map(({ product, qty }) => (
                       <div key={product.id} style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.8125rem' }}>
                         <span style={{ fontWeight: 500 }}>{product.product_name} x {qty}</span>
-                        <span>₹{(qty * Number(product.selling_price)).toFixed(2)}</span>
+                        <span>£{(qty * Number(product.selling_price)).toFixed(2)}</span>
                       </div>
                     ))}
                   </div>
@@ -404,7 +427,7 @@ export default function RestaurantHome() {
                   <div style={{ borderTop: '1px solid var(--border)', paddingTop: '0.75rem', marginBottom: '1rem' }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 700, fontSize: '0.875rem' }}>
                       <span>Subtotal</span>
-                      <span>₹{cartTotal.toFixed(2)}</span>
+                      <span>£{cartTotal.toFixed(2)}</span>
                     </div>
                   </div>
 
@@ -488,7 +511,7 @@ export default function RestaurantHome() {
                       </div>
                       <div className="ck-list-item-actions" style={{ alignItems: 'center' }}>
                         <span style={{ fontWeight: 700, fontSize: '0.875rem', marginRight: '0.75rem' }}>
-                          ₹{o.total_amount.toFixed(2)}
+                          £{o.total_amount.toFixed(2)}
                         </span>
                         <button
                           className="ck-btn-edit"
@@ -509,7 +532,7 @@ export default function RestaurantHome() {
                           {o.items.map((it) => (
                             <div key={it.id} style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.75rem' }}>
                               <span>{it.product_name} (x{it.quantity})</span>
-                              <span>₹{(Number(it.total_price)).toFixed(2)}</span>
+                              <span>£{(Number(it.total_price)).toFixed(2)}</span>
                             </div>
                           ))}
                         </div>
@@ -600,22 +623,22 @@ export default function RestaurantHome() {
               {roleRequests.length === 0
                 ? <div className="ck-empty">No role requests.</div>
                 : <div className="ck-list">{roleRequests.map(req => (
-                    <div key={req.id} className="ck-list-item" style={{ flexDirection: 'column' }}>
-                      <div style={{ display: 'flex', width: '100%', justifyContent: 'space-between', alignItems: 'center' }}>
-                        <div>
-                          <div className="ck-list-item-title">{req.role_name} <span style={{ borderRadius: '999px', padding: '0.12rem 0.5rem', fontSize: '0.7rem', fontWeight: 600, background: req.status === 'PENDING' ? '#fff8e1' : req.status === 'APPROVED' ? '#e8f5e9' : '#fce4ec', color: req.status === 'PENDING' ? '#f57c00' : req.status === 'APPROVED' ? '#388e3c' : '#c62828' }}>{req.status === 'PENDING' ? '🟡 Pending' : req.status === 'APPROVED' ? '🟢 Approved' : '🔴 Rejected'}</span></div>
-                          <div style={{ fontSize: '0.78rem', color: 'var(--text-light)' }}>Submitted {new Date(req.created_at).toLocaleDateString()}</div>
-                        </div>
-                        <button className="ck-btn-edit" onClick={() => setExpandedReqId(expandedReqId === req.id ? null : req.id)}>{expandedReqId === req.id ? 'Less ▲' : 'Details ▼'}</button>
+                  <div key={req.id} className="ck-list-item" style={{ flexDirection: 'column' }}>
+                    <div style={{ display: 'flex', width: '100%', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <div>
+                        <div className="ck-list-item-title">{req.role_name} <span style={{ borderRadius: '999px', padding: '0.12rem 0.5rem', fontSize: '0.7rem', fontWeight: 600, background: req.status === 'PENDING' ? '#fff8e1' : req.status === 'APPROVED' ? '#e8f5e9' : '#fce4ec', color: req.status === 'PENDING' ? '#f57c00' : req.status === 'APPROVED' ? '#388e3c' : '#c62828' }}>{req.status === 'PENDING' ? '🟡 Pending' : req.status === 'APPROVED' ? '🟢 Approved' : '🔴 Rejected'}</span></div>
+                        <div style={{ fontSize: '0.78rem', color: 'var(--text-light)' }}>Submitted {new Date(req.created_at).toLocaleDateString()}</div>
                       </div>
-                      {expandedReqId === req.id && (
-                        <div style={{ marginTop: '0.6rem', padding: '0.75rem', background: 'var(--surface)', borderRadius: '8px', width: '100%' }}>
-                          {req.status === 'REJECTED' && req.remarks && <div style={{ background: '#fce4ec', color: '#c62828', padding: '0.5rem 0.75rem', borderRadius: '6px', fontSize: '0.82rem' }}><strong>Reason:</strong> {req.remarks}</div>}
-                          {req.status === 'APPROVED' && req.approvedRole && <div style={{ color: '#388e3c', fontSize: '0.82rem' }}>✓ Role created: <strong>{req.approvedRole.name}</strong></div>}
-                        </div>
-                      )}
+                      <button className="ck-btn-edit" onClick={() => setExpandedReqId(expandedReqId === req.id ? null : req.id)}>{expandedReqId === req.id ? 'Less ▲' : 'Details ▼'}</button>
                     </div>
-                  ))}
+                    {expandedReqId === req.id && (
+                      <div style={{ marginTop: '0.6rem', padding: '0.75rem', background: 'var(--surface)', borderRadius: '8px', width: '100%' }}>
+                        {req.status === 'REJECTED' && req.remarks && <div style={{ background: '#fce4ec', color: '#c62828', padding: '0.5rem 0.75rem', borderRadius: '6px', fontSize: '0.82rem' }}><strong>Reason:</strong> {req.remarks}</div>}
+                        {req.status === 'APPROVED' && req.approvedRole && <div style={{ color: '#388e3c', fontSize: '0.82rem' }}>✓ Role created: <strong>{req.approvedRole.name}</strong></div>}
+                      </div>
+                    )}
+                  </div>
+                ))}
                 </div>
               }
             </div>
@@ -640,7 +663,7 @@ export default function RestaurantHome() {
                         const res = await fetch(`${API}/roles/templates/${tid}/clone`, { headers: { Authorization: `Bearer ${accessToken}` } });
                         const data = await res.json();
                         setRoleReqForm(f => ({ ...f, permission_codes: data.data.permission_codes || [] }));
-                      } catch {}
+                      } catch { }
                     }
                   }}>
                     <option value="">— None —</option>

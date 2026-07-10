@@ -442,14 +442,21 @@ export const listTenantRoles = async (req: AuthRequest, res: Response) => {
     const tenantId = getTenantId(req);
     const { type } = req.query;
 
+    // Determine the workspace type of the calling user from their JWT role_type
+    const userRoleType: string = (req.user as any).role_type ?? 'CENTRAL_KITCHEN';
+
+    // Filter by the requested type OR the user's workspace type (never show cross-type roles)
+    const filterType: string = (typeof type === 'string' && type) ? type.toUpperCase() : userRoleType.toUpperCase();
+
     const where: any = {
       deleted_at: null,
+      code: { not: '00' }, // never expose MASTER_ADMIN
+      type: filterType,
       OR: [
         { role_scope: 'GLOBAL' },
         { role_scope: 'TENANT', tenant_id: tenantId },
       ],
     };
-    if (type) where.type = type;
 
     const roles = await prisma.role.findMany({
       where,
@@ -469,8 +476,19 @@ export const listTenantRoles = async (req: AuthRequest, res: Response) => {
 // GET /roles/templates
 export const listTemplates = async (req: AuthRequest, res: Response) => {
   try {
+    const { type } = req.query;
+
+    // Determine the workspace type of the calling user from their JWT
+    const userRoleType: string = (req.user as any).role_type ?? 'CENTRAL_KITCHEN';
+    const filterType: string = (typeof type === 'string' && type) ? type.toUpperCase() : userRoleType.toUpperCase();
+
     const roles = await prisma.role.findMany({
-      where: { role_scope: 'GLOBAL', deleted_at: null },
+      where: {
+        role_scope: 'GLOBAL',
+        deleted_at: null,
+        code: { not: '00' }, // exclude MASTER_ADMIN
+        type: filterType,
+      },
       include: { role_permissions: { include: { permission: true } } },
       orderBy: { code: 'asc' },
     });

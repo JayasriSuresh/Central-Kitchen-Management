@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { authMiddleware } from '../middlewares/auth.middleware';
+import { requirePermission } from '../middlewares/rbac.middleware';
 import {
   listRawMaterials,
   createRawMaterial,
@@ -18,16 +19,16 @@ const router = Router();
 router.use(authMiddleware);
 
 // Master CRUD
-router.get('/raw-materials', listRawMaterials);
-router.post('/raw-materials', createRawMaterial);
-router.put('/raw-materials/:id', updateRawMaterial);
-router.delete('/raw-materials/:id', deleteRawMaterial);
+router.get('/raw-materials', requirePermission('stock_inventory', 'view'), listRawMaterials);
+router.post('/raw-materials', requirePermission('stock_inventory', 'create'), createRawMaterial);
+router.put('/raw-materials/:id', requirePermission('stock_inventory', 'edit'), updateRawMaterial);
+router.delete('/raw-materials/:id', requirePermission('stock_inventory', 'delete'), deleteRawMaterial);
 
 // Inventory Operations
-router.get('/dashboard', getInventoryDashboard);
-router.get('/raw-materials/:id/batches', getRawMaterialBatches);
-router.post('/batches', updateInventory);
-router.post('/adjustments', adjustStockEndpoint);
-router.get('/raw-materials/:id/history', getRawMaterialHistory);
+router.get('/dashboard', requirePermission('stock_inventory', 'view'), getInventoryDashboard);
+router.get('/raw-materials/:id/batches', requirePermission('stock_inventory', 'view'), getRawMaterialBatches);
+router.post('/batches', requirePermission('stock_inventory', 'create'), updateInventory);
+router.post('/adjustments', requirePermission('stock_inventory', 'edit'), adjustStockEndpoint);
+router.get('/raw-materials/:id/history', requirePermission('stock_inventory', 'view'), getRawMaterialHistory);
 
 export default router;

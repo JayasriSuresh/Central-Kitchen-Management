@@ -93,6 +93,7 @@ export default function Login() {
         accessToken: res.data.accessToken,
         activePortal: res.data.user.role_type,
         workspaces: res.data.workspaces,
+        permissionCodes: res.data.permissionCodes,
       });
       navigate('/dashboard');
     } catch (err: any) {
@@ -153,6 +154,7 @@ export default function Login() {
         accessToken: res.data.accessToken,
         activePortal: res.data.user.role_type,
         workspaces: res.data.workspaces,
+        permissionCodes: res.data.permissionCodes,
       });
       navigate('/dashboard');
     } catch (err: any) {

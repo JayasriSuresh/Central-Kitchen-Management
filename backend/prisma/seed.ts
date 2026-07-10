@@ -697,7 +697,283 @@ async function main() {
     console.log(`   ℹ️  Master Admin user already exists`);
   }
 
+  // 7. Seed Indian CK & Restaurant products for UK
+  await seedProductsAndCategories(prisma, tenant.id);
+
   console.log('\n✅  Seed complete.\n');
+}
+
+async function seedProductsAndCategories(prisma: PrismaClient, tenantId: number) {
+  console.log('\n7️⃣  Seeding Indian CK & Restaurant products for UK...');
+
+  // 1. Seed Units
+  const unitsData = [
+    { name: 'Kilogram', symbol: 'kg' },
+    { name: 'Gram', symbol: 'g' },
+    { name: 'Litre', symbol: 'L' },
+    { name: 'Millilitre', symbol: 'ml' },
+    { name: 'Pieces', symbol: 'pcs' },
+    { name: 'Box', symbol: 'box' },
+  ];
+
+  const units: Record<string, any> = {};
+  for (const u of unitsData) {
+    const existingUnit = await prisma.unit.findFirst({ where: { symbol: u.symbol } });
+    if (existingUnit) {
+      units[u.symbol] = existingUnit;
+    } else {
+      const created = await prisma.unit.create({ data: { name: u.name, symbol: u.symbol } });
+      units[u.symbol] = created;
+    }
+  }
+  console.log('   ✓ Seeded units: kg, g, L, ml, pcs, box');
+
+  // 2. Seed Product Categories
+  const categoriesData = [
+    'Curry Bases & Gravies',
+    'Marinated Meats',
+    'Breads & Doughs',
+    'Spices & Pastes',
+    'Desserts',
+  ];
+
+  const categories: Record<string, any> = {};
+  for (const name of categoriesData) {
+    const cat = await prisma.productCategory.upsert({
+      where: { tenant_id_name: { tenant_id: tenantId, name } },
+      update: {},
+      create: { tenant_id: tenantId, name },
+    });
+    categories[name] = cat;
+  }
+  console.log('   ✓ Seeded product categories');
+
+  // 3. Seed Raw Materials
+  const rawMaterialsData = [
+    { name: 'Chicken Breast Fillet', category: 'Meats', standard_price: 5.50, symbol: 'kg' },
+    { name: 'Tandoori Spice Paste', category: 'Spices', standard_price: 3.20, symbol: 'kg' },
+    { name: 'Fresh Cream (Double)', category: 'Dairy', standard_price: 2.80, symbol: 'L' },
+    { name: 'Onions', category: 'Vegetables', standard_price: 0.80, symbol: 'kg' },
+    { name: 'Chopped Tomatoes (Canned)', category: 'Vegetables', standard_price: 1.20, symbol: 'kg' },
+    { name: 'Garlic Purée', category: 'Spices', standard_price: 2.50, symbol: 'kg' },
+    { name: 'Ginger Purée', category: 'Spices', standard_price: 2.70, symbol: 'kg' },
+    { name: 'Lamb Chops', category: 'Meats', standard_price: 9.50, symbol: 'kg' },
+    { name: 'Atta Flour', category: 'Flour', standard_price: 1.10, symbol: 'kg' },
+    { name: 'Ghee', category: 'Dairy', standard_price: 6.80, symbol: 'kg' },
+  ];
+
+  const rawMaterials: Record<string, any> = {};
+  for (const rm of rawMaterialsData) {
+    const existing = await prisma.rawMaterial.findFirst({
+      where: { tenant_id: tenantId, name: rm.name },
+    });
+    const u = units[rm.symbol];
+    if (existing) {
+      rawMaterials[rm.name] = existing;
+    } else {
+      const created = await prisma.rawMaterial.create({
+        data: {
+          tenant_id: tenantId,
+          name: rm.name,
+          category: rm.category,
+          standard_price: rm.standard_price,
+          unit_id: u.id,
+        },
+      });
+      rawMaterials[rm.name] = created;
+    }
+  }
+  console.log('   ✓ Seeded raw materials');
+
+  // 4. Seed Products
+  const productsData = [
+    {
+      product_name: 'Tikka Masala Curry Base 5L',
+      code: 'PROD-TMCB',
+      category: 'Curry Bases & Gravies',
+      symbol: 'L',
+      selling_price: 18.50,
+      moq: 1,
+      batch_size: 5,
+      shelf_life_days: 7,
+      order_cutoff_hours: 12,
+      lead_time_days: 1,
+      recipe: [
+        { name: 'Onions', qty: 2.0 },
+        { name: 'Chopped Tomatoes (Canned)', qty: 1.5 },
+        { name: 'Garlic Purée', qty: 0.2 },
+        { name: 'Ginger Purée', qty: 0.2 },
+        { name: 'Tandoori Spice Paste', qty: 0.3 },
+        { name: 'Fresh Cream (Double)', qty: 0.8 },
+      ]
+    },
+    {
+      product_name: 'Korma Curry Base 5L',
+      code: 'PROD-KCB',
+      category: 'Curry Bases & Gravies',
+      symbol: 'L',
+      selling_price: 19.50,
+      moq: 1,
+      batch_size: 5,
+      shelf_life_days: 7,
+      order_cutoff_hours: 12,
+      lead_time_days: 1,
+      recipe: [
+        { name: 'Onions', qty: 1.5 },
+        { name: 'Garlic Purée', qty: 0.2 },
+        { name: 'Ginger Purée', qty: 0.2 },
+        { name: 'Fresh Cream (Double)', qty: 1.2 },
+        { name: 'Ghee', qty: 0.2 },
+      ]
+    },
+    {
+      product_name: 'Marinated Chicken Tikka (Raw)',
+      code: 'PROD-MCT',
+      category: 'Marinated Meats',
+      symbol: 'kg',
+      selling_price: 8.20,
+      moq: 2,
+      batch_size: 10,
+      shelf_life_days: 4,
+      order_cutoff_hours: 24,
+      lead_time_days: 1,
+      recipe: [
+        { name: 'Chicken Breast Fillet', qty: 1.0 },
+        { name: 'Tandoori Spice Paste', qty: 0.15 },
+        { name: 'Fresh Cream (Double)', qty: 0.05 },
+      ]
+    },
+    {
+      product_name: 'Tandoori Lamb Chops (Raw)',
+      code: 'PROD-TLC',
+      category: 'Marinated Meats',
+      symbol: 'kg',
+      selling_price: 12.50,
+      moq: 2,
+      batch_size: 5,
+      shelf_life_days: 4,
+      order_cutoff_hours: 24,
+      lead_time_days: 2,
+      recipe: [
+        { name: 'Lamb Chops', qty: 1.0 },
+        { name: 'Tandoori Spice Paste', qty: 0.20 },
+      ]
+    },
+    {
+      product_name: 'Naan Dough Balls (Pack of 50)',
+      code: 'PROD-NDB',
+      category: 'Breads & Doughs',
+      symbol: 'box',
+      selling_price: 15.00,
+      moq: 1,
+      batch_size: 1,
+      shelf_life_days: 3,
+      order_cutoff_hours: 12,
+      lead_time_days: 1,
+      recipe: [
+        { name: 'Atta Flour', qty: 5.0 },
+        { name: 'Ghee', qty: 0.5 },
+      ]
+    },
+    {
+      product_name: 'Ginger-Garlic Paste 1kg',
+      code: 'PROD-GGP',
+      category: 'Spices & Pastes',
+      symbol: 'kg',
+      selling_price: 4.50,
+      moq: 1,
+      batch_size: 1,
+      shelf_life_days: 14,
+      order_cutoff_hours: 6,
+      lead_time_days: 1,
+      recipe: [
+        { name: 'Ginger Purée', qty: 0.5 },
+        { name: 'Garlic Purée', qty: 0.5 },
+      ]
+    }
+  ];
+
+  for (const p of productsData) {
+    const cat = categories[p.category];
+    const u = units[p.symbol];
+
+    let product = await prisma.product.findFirst({
+      where: { tenant_id: tenantId, code: p.code },
+    });
+
+    if (product) {
+      product = await prisma.product.update({
+        where: { id: product.id },
+        data: {
+          product_name: p.product_name,
+          moq: p.moq,
+          batch_size: p.batch_size,
+          selling_price: p.selling_price,
+          shelf_life_days: p.shelf_life_days,
+          order_cutoff_hours: p.order_cutoff_hours,
+          lead_time_days: p.lead_time_days,
+        }
+      });
+    } else {
+      product = await prisma.product.create({
+        data: {
+          tenant_id: tenantId,
+          product_name: p.product_name,
+          code: p.code,
+          category_id: cat.id,
+          unit_id: u.id,
+          moq: p.moq,
+          batch_size: p.batch_size,
+          selling_price: p.selling_price,
+          shelf_life_days: p.shelf_life_days,
+          order_cutoff_hours: p.order_cutoff_hours,
+          lead_time_days: p.lead_time_days,
+          status: 'active',
+        }
+      });
+    }
+
+    // Seeding Recipe for the product
+    let recipeObj = await prisma.recipe.findFirst({
+      where: { product_id: product.id },
+    });
+
+    if (!recipeObj) {
+      recipeObj = await prisma.recipe.create({
+        data: {
+          tenant_id: tenantId,
+          product_id: product.id,
+          version_no: 1,
+          base_quantity: 1.0,
+          is_active: true,
+        }
+      });
+    }
+
+    // Seed Recipe ingredients
+    for (const ri of p.recipe) {
+      const rm = rawMaterials[ri.name];
+      await prisma.recipeIngredient.upsert({
+        where: {
+          recipe_id_raw_material_id: {
+            recipe_id: recipeObj.id,
+            raw_material_id: rm.id,
+          }
+        },
+        update: {
+          quantity: ri.qty,
+        },
+        create: {
+          recipe_id: recipeObj.id,
+          raw_material_id: rm.id,
+          quantity: ri.qty,
+          unit_id: rm.unit_id,
+        }
+      });
+    }
+  }
+
+  console.log('   ✓ Seeded products, recipes, and recipe ingredients');
 }
 
 async function getSystemRoleId(code: string): Promise<number> {
@@ -711,3 +987,4 @@ async function getSystemRoleId(code: string): Promise<number> {
 main()
   .catch((e) => { console.error(e); process.exit(1); })
   .finally(() => prisma.$disconnect());
+

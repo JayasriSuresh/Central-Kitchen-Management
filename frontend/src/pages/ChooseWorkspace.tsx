@@ -56,6 +56,7 @@ export default function ChooseWorkspace() {
         accessToken: res.data.accessToken,
         activePortal: selected.type,
         workspaces: res.data.workspaces,
+        permissionCodes: res.data.permissionCodes,
       });
       navigate('/dashboard');
     } catch (err: any) {

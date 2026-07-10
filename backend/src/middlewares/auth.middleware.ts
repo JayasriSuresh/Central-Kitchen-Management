@@ -21,15 +21,27 @@ export const authMiddleware = async (req: AuthRequest, res: Response, next: Next
       return res.status(401).json({ message: 'Unauthorized: Invalid token payload' });
     }
 
+    // Lightweight user check — no need to load full permissions from DB since they're in the JWT
     const user = await prisma.user.findUnique({
       where: { id: decoded.userId, deleted_at: null },
-      include: {
-        // New schema: roles live on the User via primaryRole (the FK primary_role_id)
+      select: {
+        id: true,
+        user_id: true,
+        username: true,
+        name: true,
+        email: true,
+        mobile: true,
+        status: true,
+        tenant_id: true,
+        restaurant_id: true,
+        primary_role_id: true,
         primaryRole: {
-          include: {
-            role_permissions: {
-              include: { permission: true },
-            },
+          select: {
+            id: true,
+            name: true,
+            code: true,
+            type: true,
+            is_super_admin: true,
           },
         },
       },
@@ -43,23 +55,15 @@ export const authMiddleware = async (req: AuthRequest, res: Response, next: Next
       return res.status(403).json({ message: 'Forbidden: User is inactive' });
     }
 
-    // Override active workspace context dynamically
+    // Override active workspace context dynamically from JWT
     if (decoded.activeWorkspace) {
-      const activeRole = await prisma.role.findUnique({
-        where: { id: decoded.activeWorkspace.roleId },
-        include: {
-          role_permissions: {
-            include: { permission: true },
-          },
-        },
-      });
-      if (activeRole) {
-        user.primaryRole = activeRole as any;
-        user.primary_role_id = activeRole.id;
-      }
-      user.restaurant_id = decoded.activeWorkspace.restaurantId ?? null;
+      user.primary_role_id = decoded.activeWorkspace.roleId;
+      (user as any).restaurant_id = decoded.activeWorkspace.restaurantId ?? null;
       (user as any).role_type = decoded.activeWorkspace.type;
     }
+
+    // Attach permissions from JWT (no DB round-trip needed)
+    (user as any).permissionCodes = decoded.permissionCodes ?? [];
 
     req.user = user;
     req.tenantId = user.tenant_id ?? undefined;

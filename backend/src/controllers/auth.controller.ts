@@ -86,7 +86,7 @@ export const login = async (req: Request, res: Response) => {
         deleted_at: null,
       },
       include: {
-        primaryRole: { select: { type: true } },
+        primaryRole: { select: { id: true, name: true, code: true, type: true, is_super_admin: true } },
         user_roles: {
           include: {
             role: true
@@ -150,11 +150,11 @@ export const login = async (req: Request, res: Response) => {
     ]);
 
     const portals: string[] = [];
-    if (user.primaryRole?.type === 'system') {
+    if (user.primaryRole?.code === '00' || user.primaryRole?.type === 'MASTER_ADMIN' || user.primaryRole?.type === 'system') {
       portals.push('system');
     } else {
-      const hasCk = user.primaryRole?.type === 'central_kitchen' || user.user_roles.some((ur: any) => ur.role.type === 'central_kitchen');
-      const hasRest = user.primaryRole?.type === 'restaurant' || user.restaurant_user_roles.some((rur: any) => rur.role.type === 'restaurant');
+      const hasCk = user.primaryRole?.type === 'CENTRAL_KITCHEN' || user.user_roles.some((ur: any) => ur.role.type === 'CENTRAL_KITCHEN');
+      const hasRest = user.primaryRole?.type === 'RESTAURANT' || user.restaurant_user_roles.some((rur: any) => rur.role.type === 'RESTAURANT');
       if (hasCk) portals.push('central_kitchen');
       if (hasRest) portals.push('restaurant');
     }
@@ -226,7 +226,7 @@ const getWorkspaces = async (userId: number, primaryRole: any, tenantId: number 
 
   // 1. Central Kitchen workspace (if they have a central_kitchen role)
   const ckRoles = await prisma.userRole.findMany({
-    where: { user_id: userId, role: { type: 'central_kitchen' } },
+    where: { user_id: userId, role: { type: 'CENTRAL_KITCHEN' } },
     include: { role: true }
   });
 
@@ -239,7 +239,7 @@ const getWorkspaces = async (userId: number, primaryRole: any, tenantId: number 
         roleCode: ur.role.code,
       });
     }
-  } else if (primaryRole?.type === 'central_kitchen') {
+  } else if (primaryRole?.type === 'CENTRAL_KITCHEN') {
     workspaces.push({
       type: 'central_kitchen',
       roleId: primaryRole.id,
@@ -300,14 +300,14 @@ export const selectWorkspace = async (req: Request, res: Response) => {
 
     let roleId: number | null = null;
 
-    if (type === 'central_kitchen') {
-      const ur = user.user_roles.find(r => r.role.type === 'central_kitchen');
+    if (type === 'CENTRAL_KITCHEN') {
+      const ur = user.user_roles.find((r: any) => r.role.type === 'CENTRAL_KITCHEN');
       if (ur) {
         roleId = ur.role.id;
-      } else if (user.primaryRole?.type === 'central_kitchen') {
+      } else if (user.primaryRole?.type === 'CENTRAL_KITCHEN') {
         roleId = user.primary_role_id;
       }
-    } else if (type === 'restaurant') {
+    } else if (type === 'RESTAURANT') {
       if (!restaurantId) {
         return res.status(400).json({ message: 'restaurantId is required' });
       }
@@ -339,8 +339,8 @@ export const selectWorkspace = async (req: Request, res: Response) => {
     );
 
     const portals: string[] = [];
-    const hasCk = user.primaryRole?.type === 'central_kitchen' || user.user_roles.some((ur: any) => ur.role.type === 'central_kitchen');
-    const hasRest = user.primaryRole?.type === 'restaurant' || user.restaurant_user_roles.some((rur: any) => rur.role.type === 'restaurant');
+    const hasCk = user.primaryRole?.type === 'CENTRAL_KITCHEN' || user.user_roles.some((ur: any) => ur.role.type === 'CENTRAL_KITCHEN');
+    const hasRest = user.primaryRole?.type === 'RESTAURANT' || user.restaurant_user_roles.some((rur: any) => rur.role.type === 'RESTAURANT');
     if (hasCk) portals.push('central_kitchen');
     if (hasRest) portals.push('restaurant');
 
@@ -392,13 +392,13 @@ export const switchWorkspace = async (req: AuthRequest, res: Response) => {
       const ur = await prisma.userRole.findFirst({
         where: {
           user_id: user.id,
-          role: { type: 'central_kitchen' }
+          role: { type: 'CENTRAL_KITCHEN' }
         },
         include: { role: true }
       });
       if (ur) {
         roleId = ur.role.id;
-      } else if (user.primaryRole?.type === 'central_kitchen') {
+      } else if (user.primaryRole?.type === 'CENTRAL_KITCHEN') {
         roleId = user.primary_role_id;
       }
     } else if (type === 'restaurant') {
@@ -438,8 +438,8 @@ export const switchWorkspace = async (req: AuthRequest, res: Response) => {
     );
 
     const portals: string[] = [];
-    const hasCk = user.primaryRole?.type === 'central_kitchen' || user.user_roles.some((ur: any) => ur.role.type === 'central_kitchen');
-    const hasRest = user.primaryRole?.type === 'restaurant' || user.restaurant_user_roles.some((rur: any) => rur.role.type === 'restaurant');
+    const hasCk = user.primaryRole?.type === 'CENTRAL_KITCHEN' || user.user_roles.some((ur: any) => ur.role.type === 'CENTRAL_KITCHEN');
+    const hasRest = user.primaryRole?.type === 'RESTAURANT' || user.restaurant_user_roles.some((rur: any) => rur.role.type === 'RESTAURANT');
     if (hasCk) portals.push('central_kitchen');
     if (hasRest) portals.push('restaurant');
 
@@ -907,10 +907,14 @@ export const loginOtpVerify = async (req: Request, res: Response) => {
     ]);
 
     const portals: string[] = [];
-    const hasCk = user.primaryRole?.type === 'central_kitchen' || user.user_roles.some((ur: any) => ur.role.type === 'central_kitchen');
-    const hasRest = user.primaryRole?.type === 'restaurant' || user.restaurant_user_roles.some((rur: any) => rur.role.type === 'restaurant');
-    if (hasCk) portals.push('central_kitchen');
-    if (hasRest) portals.push('restaurant');
+    if (user.primaryRole?.code === '00' || user.primaryRole?.type === 'MASTER_ADMIN' || user.primaryRole?.type === 'system') {
+      portals.push('system');
+    } else {
+      const hasCk = user.primaryRole?.type === 'CENTRAL_KITCHEN' || user.user_roles.some((ur: any) => ur.role.type === 'CENTRAL_KITCHEN');
+      const hasRest = user.primaryRole?.type === 'RESTAURANT' || user.restaurant_user_roles.some((rur: any) => rur.role.type === 'RESTAURANT');
+      if (hasCk) portals.push('central_kitchen');
+      if (hasRest) portals.push('restaurant');
+    }
 
     const workspaces = await getWorkspaces(user.id, user.primaryRole, tenant_id);
 

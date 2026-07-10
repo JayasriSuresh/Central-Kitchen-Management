@@ -26,7 +26,7 @@ export default function AdminLogin() {
         password,
       });
 
-      if (res.data.user.role_type !== 'system') {
+      if (!res.data.user.portals || !res.data.user.portals.includes('system')) {
         setError('Unauthorized: This portal is for Master Administrators only.');
         setLoading(false);
         return;

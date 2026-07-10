@@ -21,7 +21,7 @@ function RoleRedirect() {
     return <Navigate to="/choose-workspace" replace />;
   }
 
-  const portal = activePortal || user.role_type;
+  const portal = (activePortal || user.role_type)?.toLowerCase();
   if (portal === 'system') return <Navigate to="/system" replace />;
   if (portal === 'restaurant') return <Navigate to="/restaurant" replace />;
   return <Navigate to="/central-kitchen" replace />;
@@ -32,8 +32,8 @@ function PrivateRoute({ children, allowedPortal }: { children: React.ReactNode; 
   if (!user) return <Navigate to="/login" replace />;
 
   if (allowedPortal) {
-    const portal = activePortal || user.role_type;
-    if (portal !== allowedPortal) {
+    const portal = (activePortal || user.role_type)?.toLowerCase();
+    if (portal !== allowedPortal?.toLowerCase()) {
       if (portal === 'system') return <Navigate to="/system" replace />;
       if (portal === 'restaurant') return <Navigate to="/restaurant" replace />;
       return <Navigate to="/central-kitchen" replace />;

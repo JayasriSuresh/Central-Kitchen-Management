@@ -28,7 +28,7 @@ import {
   rollbackRole,
 } from '../controllers/role.controller';
 import { authMiddleware } from '../middlewares/auth.middleware';
-import { requireMasterAdmin } from '../middlewares/rbac.middleware';
+import { requireMasterAdmin, requireSuperAdmin, requirePermission } from '../middlewares/rbac.middleware';
 
 const router = Router();
 
@@ -47,25 +47,25 @@ router.put('/global/:id', requireMasterAdmin, updateGlobalRole);
 router.delete('/global/:id', requireMasterAdmin, deleteGlobalRole);
 
 // ── Role Requests ──────────────────────────────────────────────────────────────
-router.post('/requests', submitRoleRequest);
-router.get('/requests', listRoleRequests);
-router.get('/requests/:id', getRoleRequestById);
+router.post('/requests', requireSuperAdmin, submitRoleRequest);
+router.get('/requests', requirePermission('login_user_mgmt', 'view'), listRoleRequests);
+router.get('/requests/:id', requirePermission('login_user_mgmt', 'view'), getRoleRequestById);
 router.post('/requests/:id/approve', requireMasterAdmin, approveRoleRequest);
 router.post('/requests/:id/reject', requireMasterAdmin, rejectRoleRequest);
 
 // ── Tenant / Template Roles ────────────────────────────────────────────────────
-router.get('/tenant', listTenantRoles);
-router.get('/templates', listTemplates);
-router.post('/templates/:id/clone', cloneRoleToRequest);
+router.get('/tenant', requirePermission('login_user_mgmt', 'view'), listTenantRoles);
+router.get('/templates', requirePermission('login_user_mgmt', 'view'), listTemplates);
+router.post('/templates/:id/clone', requireSuperAdmin, cloneRoleToRequest);
 
 // ── Single Role + Permissions ──────────────────────────────────────────────────
 // NOTE: keep specific paths before :id
-router.get('/:id', getRoleById);
-router.put('/:id/permissions', updateRolePermissions);
+router.get('/:id', requirePermission('login_user_mgmt', 'view'), getRoleById);
+router.put('/:id/permissions', requireSuperAdmin, updateRolePermissions);
 
 // ── Role Versions ──────────────────────────────────────────────────────────────
-router.get('/:id/versions', listRoleVersions);
-router.get('/:id/versions/:versionNo', getRoleVersion);
+router.get('/:id/versions', requirePermission('login_user_mgmt', 'view'), listRoleVersions);
+router.get('/:id/versions/:versionNo', requirePermission('login_user_mgmt', 'view'), getRoleVersion);
 router.post('/:id/versions/:versionNo/rollback', requireMasterAdmin, rollbackRole);
 
 export default router;
