@@ -3,7 +3,11 @@ import prisma from '../utils/prisma';
 import { adjustStock } from '../services/inventory.service';
 import { Prisma } from '@prisma/client';
 
-const getTenantId = (req: Request): number => (req as any).tenantId;
+const getTenantId = (req: Request): number => {
+  const tenantId = (req as any).tenantId;
+  if (!tenantId) throw new Error('Central Kitchen tenant scope is required');
+  return tenantId;
+};
 const getCreatedBy = (req: Request): string => (req as any).user?.username || 'system';
 
 // ─── RAW MATERIALS MASTER (CRUD) ──────────────────────────────────────────────

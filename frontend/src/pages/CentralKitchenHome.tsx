@@ -80,7 +80,7 @@ const txLabel: Record<string, string> = {
 };
 
 // ─── Section Tab ──────────────────────────────────────────────────────────────
-type Section = 'dashboard' | 'restaurants' | 'requests' | 'users' | 'products' | 'raw-materials' | 'inventory' | 'production' | 'purchase';
+type Section = 'dashboard' | 'restaurants' | 'requests' | 'users' | 'products' | 'raw-materials' | 'inventory' | 'production' | 'purchase' | 'roles';
 
 interface OnboardingRequest {
   id: number;
@@ -261,6 +261,20 @@ export default function CentralKitchenHome() {
   const [invError, setInvError] = useState('');
   const [invSuccess, setInvSuccess] = useState('');
 
+  // ── Roles section state ────────────────────────────────────────────────────
+  const [rolesSubTab, setRolesSubTab] = useState<'my-roles' | 'requests' | 'new-request'>('my-roles');
+  const [tenantRoles, setTenantRoles] = useState<any[]>([]);
+  const [roleRequests, setRoleRequests] = useState<any[]>([]);
+  const [allPermissions, setAllPermissions] = useState<any[]>([]);
+  const [templates, setTemplates] = useState<any[]>([]);
+  const [rolesLoading, setRolesLoading] = useState(false);
+  const [expandedRoleId, setExpandedRoleId] = useState<number | null>(null);
+  const [expandedReqId, setExpandedReqId] = useState<number | null>(null);
+  const [roleReqForm, setRoleReqForm] = useState({ role_name: '', description: '', role_type: 'CENTRAL_KITCHEN', template_role_id: '', permission_codes: [] as string[] });
+  const [roleReqError, setRoleReqError] = useState('');
+  const [roleReqSuccess, setRoleReqSuccess] = useState('');
+  const [roleReqSubmitting, setRoleReqSubmitting] = useState(false);
+
   const authHeader = { Authorization: `Bearer ${accessToken}` };
 
   const handleLogout = () => { logout(); navigate('/login'); };
@@ -423,6 +437,29 @@ export default function CentralKitchenHome() {
   useEffect(() => { if (section === 'raw-materials') fetchRawMaterials(); }, [section, fetchRawMaterials]);
   useEffect(() => { if (section === 'production') fetchProductionPlans(); }, [section, fetchProductionPlans]);
   useEffect(() => { if (section === 'purchase') fetchPurchaseData(); }, [section, fetchPurchaseData]);
+
+  const loadRolesData = async () => {
+    setRolesLoading(true);
+    try {
+      const [rolesRes, reqsRes, permsRes, tmplRes] = await Promise.all([
+        fetch(`${API}/roles/tenant`, { headers: { Authorization: `Bearer ${accessToken}` } }),
+        fetch(`${API}/roles/requests`, { headers: { Authorization: `Bearer ${accessToken}` } }),
+        fetch(`${API}/roles/permissions`, { headers: { Authorization: `Bearer ${accessToken}` } }),
+        fetch(`${API}/roles/templates`, { headers: { Authorization: `Bearer ${accessToken}` } }),
+      ]);
+      const [rolesData, reqsData, permsData, tmplData] = await Promise.all([
+        rolesRes.json(), reqsRes.json(), permsRes.json(), tmplRes.json(),
+      ]);
+      setTenantRoles(rolesData.data || []);
+      setRoleRequests(reqsData.data || []);
+      setAllPermissions(permsData.data || []);
+      setTemplates(tmplData.data || []);
+    } catch (err) {
+      console.error('Failed to load roles data', err);
+    } finally {
+      setRolesLoading(false);
+    }
+  };
 
   const openRmDetail = async (item: InventoryItem) => {
     setSelectedRmDetail(item);
@@ -727,6 +764,8 @@ export default function CentralKitchenHome() {
                     onClick={() => navigateTo('users')}>Users</button>
                   <button className={`ck-nav-child ${section === 'products' ? 'ck-nav-child--active' : ''}`}
                     onClick={() => navigateTo('products')}>Products</button>
+                  <button className={`ck-nav-child ${section === 'roles' ? 'ck-nav-child--active' : ''}`}
+                    onClick={() => { navigateTo('roles'); loadRolesData(); }}>Roles</button>
                 </div>
               )}
             </div>
@@ -838,133 +877,7 @@ export default function CentralKitchenHome() {
           </div>
         )}
 
-        {/* ── PLAN PRODUCTION MODAL OVERLAY ── */}
-        {showPlanModal && (
-          <div className="plan-overlay" onClick={() => setShowPlanModal(false)}>
-            <div className="plan-modal" onClick={e => e.stopPropagation()}>
-              <div className="plan-modal-header">
-                <h3>🏭 Plan Production — {planningProductName}</h3>
-                <button className="inv-modal-close" onClick={() => setShowPlanModal(false)}>✕</button>
-              </div>
-              <div className="plan-modal-body">
-                {/* Buffer & Preview trigger */}
-                <div className="plan-buffer-row">
-                  <label className="plan-label">Production Buffer Quantity</label>
-                  <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center' }}>
-                    <input className="plan-input" type="number" min="0" step="1" value={planBufferQty}
-                      onChange={e => setPlanBufferQty(e.target.value)}
-                      placeholder="e.g. 15" style={{ width: '100px' }} />
-                    <button className="ck-btn-add" onClick={runPreview} disabled={planPreviewLoading}>
-                      {planPreviewLoading ? '⟳ Calculating…' : '📊 Calculate Plan'}
-                    </button>
-                  </div>
-                </div>
 
-                {planPreviewError && <div className="plan-error">{planPreviewError}</div>}
-                {planSaveSuccess && <div className="plan-success">{planSaveSuccess}</div>}
-
-                {planPreview && (
-                  <>
-                    {/* ── Restaurant Demand ── */}
-                    <div className="plan-section-title">🏪 Restaurant Demand Breakdown</div>
-                    <div className="plan-restaurant-grid">
-                      {planPreview.restaurant_demand.map((r, i) => (
-                        <div key={i} className="plan-restaurant-card">
-                          <div className="plan-restaurant-name">{r.restaurant_name}</div>
-                          <div className="plan-restaurant-qty">{r.quantity} <span className="plan-unit">{planPreview.raw_material_requirements[0]?.unit_symbol || 'dishes'}</span></div>
-                        </div>
-                      ))}
-                    </div>
-
-                    {/* ── Production Calculation ── */}
-                    <div className="plan-section-title">📐 Production Calculation</div>
-                    <div className="plan-calc-row">
-                      <div className="plan-calc-box plan-calc-blue">
-                        <div className="plan-calc-label">Total Demand</div>
-                        <div className="plan-calc-value">{planPreview.total_demand}</div>
-                      </div>
-                      <div className="plan-calc-op">+</div>
-                      <div className="plan-calc-box plan-calc-amber">
-                        <div className="plan-calc-label">Buffer</div>
-                        <div className="plan-calc-value">{planPreview.buffer_qty}</div>
-                      </div>
-                      <div className="plan-calc-op">−</div>
-                      <div className="plan-calc-box plan-calc-teal">
-                        <div className="plan-calc-label">Finished Stock</div>
-                        <div className="plan-calc-value">{planPreview.finished_stock}</div>
-                      </div>
-                      <div className="plan-calc-op">=</div>
-                      <div className="plan-calc-box plan-calc-green">
-                        <div className="plan-calc-label">Required Production</div>
-                        <div className="plan-calc-value plan-calc-main">{planPreview.required_qty}</div>
-                      </div>
-                    </div>
-
-                    {/* ── Material Summary Badge ── */}
-                    {planPreview.has_recipe && (
-                      <div className="plan-summary-row">
-                        <span className="plan-summary-badge plan-summary-ok">✓ {planPreview.summary.available} Materials Available</span>
-                        {planPreview.summary.short > 0 && <span className="plan-summary-badge plan-summary-short">⚠ {planPreview.summary.short} Materials Short</span>}
-                      </div>
-                    )}
-
-                    {/* ── Raw Material Requirements ── */}
-                    {planPreview.has_recipe ? (
-                      <>
-                        <div className="plan-section-title">🧪 Raw Material Requirements (FEFO Allocation)</div>
-                        <div className="plan-rm-table">
-                          <div className="plan-rm-head">
-                            <span>Material</span><span>Required</span><span>Available</span><span>Status</span><span>FEFO Batches</span>
-                          </div>
-                          {planPreview.raw_material_requirements.map((rm) => (
-                            <div key={rm.raw_material_id}>
-                              <div className={`plan-rm-row ${rm.status === 'short' ? 'plan-rm-row--short' : 'plan-rm-row--ok'}`}
-                                onClick={() => setExpandedRMId(expandedRMId === rm.raw_material_id ? null : rm.raw_material_id)}
-                                style={{ cursor: 'pointer' }}>
-                                <span><strong>{rm.raw_material_name}</strong></span>
-                                <span>{rm.required_qty.toFixed(2)} {rm.unit_symbol}</span>
-                                <span>{rm.available_qty.toFixed(2)} {rm.unit_symbol}</span>
-                                <span>
-                                  {rm.status === 'short'
-                                    ? <span className="plan-short-badge">⚠ Short by {rm.shortage.toFixed(2)} {rm.unit_symbol}</span>
-                                    : <span className="plan-ok-badge">✓ Enough</span>}
-                                </span>
-                                <span style={{ fontSize: '0.75rem', color: 'var(--text-light)' }}>
-                                  {rm.fefo_allocations.length} batch(es) {expandedRMId === rm.raw_material_id ? '▲' : '▼'}
-                                </span>
-                              </div>
-                              {expandedRMId === rm.raw_material_id && rm.fefo_allocations.length > 0 && (
-                                <div className="plan-fefo-list fade-in">
-                                  {rm.fefo_allocations.map((a, ai) => (
-                                    <div key={ai} className="plan-fefo-row">
-                                      <span>Batch #{a.batch_no || a.batch_id}</span>
-                                      <span>Expires: {a.expiry_date ? new Date(a.expiry_date).toLocaleDateString('en-IN') : 'No expiry'}</span>
-                                      <span className="plan-fefo-alloc">Allocate: {a.allocated_qty.toFixed(2)} {rm.unit_symbol}</span>
-                                    </div>
-                                  ))}
-                                </div>
-                              )}
-                            </div>
-                          ))}
-                        </div>
-                      </>
-                    ) : (
-                      <div className="plan-no-recipe">⚠️ No active recipe/BOM configured for this product. Set up a recipe under the Products tab first.</div>
-                    )}
-                  </>
-                )}
-              </div>
-              <div className="plan-modal-footer">
-                <button className="ck-btn-cancel-sm" onClick={() => setShowPlanModal(false)}>Close</button>
-                {planPreview && planPreview.has_recipe && !planSaveSuccess && (
-                  <button className="ck-btn-add" onClick={saveDraftPlan} disabled={savingPlan}>
-                    {savingPlan ? 'Saving…' : '💾 Save Draft Plan'}
-                  </button>
-                )}
-              </div>
-            </div>
-          </div>
-        )}
 
         {/* Header row (only for non-dashboard tabs) */}
         {['restaurants', 'users', 'products'].includes(section) && (
@@ -1870,139 +1783,294 @@ export default function CentralKitchenHome() {
               </div>
             )}
 
-            {/* Approve Request Modal */}
-            {approveModal && (
-              <div className="plan-overlay" onClick={() => setApproveModal(null)}>
-                <div className="plan-modal" onClick={e => e.stopPropagation()} style={{ maxWidth: '500px' }}>
-                  <div className="plan-modal-header">
-                    <h3>✓ Approve Purchase Request</h3>
-                    <button className="inv-modal-close" onClick={() => setApproveModal(null)}>✕</button>
-                  </div>
-                  <div className="plan-modal-body">
-                    <p style={{ margin: '0 0 1rem', color: 'var(--text-light)', fontSize: '0.9rem' }}>
-                      Material: <strong>{approveModal.requirement.rawMaterial.name}</strong> — Needed: <strong>{Number(approveModal.requirement.purchase_needed_qty).toFixed(2)} {approveModal.requirement.rawMaterial.unit?.symbol || ''}</strong>
-                    </p>
-                    <div className="plan-buffer-row">
-                      <label className="plan-label">Vendor *</label>
-                      <select className="ck-select" style={{ marginTop: '0.25rem' }} value={approveForm.vendor_id} onChange={e => setApproveForm(f => ({ ...f, vendor_id: e.target.value }))}>
-                        <option value="">— Select Vendor —</option>
-                        {vendors.map(v => <option key={v.id} value={v.id}>{v.name}</option>)}
-                      </select>
-                    </div>
-                    <div className="plan-buffer-row">
-                      <label className="plan-label">Quantity to Purchase</label>
-                      <input className="plan-input" type="number" step="0.01" value={approveForm.modified_qty} onChange={e => setApproveForm(f => ({ ...f, modified_qty: e.target.value }))} />
-                    </div>
-                    <div className="plan-buffer-row">
-                      <label className="plan-label">Unit Price (₹) *</label>
-                      <input className="plan-input" type="number" step="0.01" value={approveForm.unit_price} onChange={e => setApproveForm(f => ({ ...f, unit_price: e.target.value }))} />
-                    </div>
-                    <div className="plan-buffer-row">
-                      <label className="plan-label">Expected Delivery Date</label>
-                      <input className="plan-input" type="date" value={approveForm.expected_delivery_date} onChange={e => setApproveForm(f => ({ ...f, expected_delivery_date: e.target.value }))} />
-                    </div>
-                    {purchaseErr && <div className="plan-error">{purchaseErr}</div>}
-                  </div>
-                  <div className="plan-modal-footer">
-                    <button className="ck-btn-cancel-sm" onClick={() => setApproveModal(null)}>Cancel</button>
-                    <button className="ck-btn-add" disabled={planActionLoading || !approveForm.vendor_id || !approveForm.unit_price}
-                      onClick={async () => {
-                        setPlanActionLoading(true);
-                        setPurchaseErr('');
-                        try {
-                          await axios.post(`${API}/purchase/requests/${approveModal.id}/approve`, approveForm, { headers: authHeader });
-                          setApproveModal(null);
-                          setPurchaseMsg('✓ Purchase Order created!');
-                          await fetchPurchaseData();
-                          setTimeout(() => setPurchaseMsg(''), 4000);
-                        } catch (err: any) {
-                          setPurchaseErr(err.response?.data?.message ?? 'Approval failed');
-                        } finally { setPlanActionLoading(false); }
-                      }}>
-                      {planActionLoading ? '...' : '✓ Approve & Create PO'}
-                    </button>
-                  </div>
+
+          </div>
+        )}
+
+        {/* ── ROLES SECTION ── */}
+        {section === 'roles' && (
+          <div className="fade-in" style={{ padding: '2rem' }}>
+            <div className="ck-section-header" style={{ marginBottom: '1.5rem' }}>
+              <div>
+                <h2 className="ck-section-title">🔐 Role Management</h2>
+                <p className="ck-section-subtitle">View assigned roles and request custom roles for your kitchen</p>
+              </div>
+              {rolesSubTab !== 'new-request' && (
+                <button className="ck-btn-add" onClick={() => { setRolesSubTab('new-request'); loadRolesData(); }}>
+                  + Request New Role
+                </button>
+              )}
+            </div>
+
+            {/* Sub-tabs */}
+            <div className="ck-tabs" style={{ marginBottom: '1.5rem' }}>
+              {(['my-roles', 'requests'] as const).map(tab => (
+                <button key={tab}
+                  className={`ck-tab ${rolesSubTab === tab ? 'ck-tab--active' : ''}`}
+                  onClick={() => { setRolesSubTab(tab); if (tab === 'my-roles' || tab === 'requests') loadRolesData(); }}>
+                  {tab === 'my-roles' ? 'My Roles' : 'Role Requests'}
+                </button>
+              ))}
+            </div>
+
+            {rolesLoading && <div className="ck-empty">Loading roles…</div>}
+
+            {/* ── MY ROLES TAB ── */}
+            {!rolesLoading && rolesSubTab === 'my-roles' && (
+              <div>
+                {/* GLOBAL roles */}
+                <h3 style={{ fontSize: '1rem', color: 'var(--text-light)', marginBottom: '0.75rem', textTransform: 'uppercase', letterSpacing: '0.05em' }}>🌐 Global Roles</h3>
+                <div className="ck-list" style={{ marginBottom: '2rem' }}>
+                  {tenantRoles.filter(r => r.role_scope === 'GLOBAL').length === 0
+                    ? <div className="ck-empty">No global roles assigned.</div>
+                    : tenantRoles.filter(r => r.role_scope === 'GLOBAL').map(role => (
+                      <div key={role.id} className="ck-list-item" style={{ flexDirection: 'column' }}>
+                        <div style={{ display: 'flex', width: '100%', justifyContent: 'space-between', alignItems: 'center' }}>
+                          <div className="ck-list-item-main">
+                            <div className="ck-list-item-title">
+                              {role.name}
+                              <span className="ck-status-badge ck-status-badge--active" style={{ marginLeft: '0.5rem', fontSize: '0.7rem' }}>{role.type}</span>
+                            </div>
+                            <div className="ck-list-item-meta">
+                              <span style={{ color: 'var(--text-light)', fontSize: '0.8rem' }}>{role.role_permissions?.length ?? 0} permissions</span>
+                              {role.description && <span style={{ color: 'var(--text-light)', fontSize: '0.8rem' }}>— {role.description}</span>}
+                            </div>
+                          </div>
+                          <button className="ck-btn-edit" onClick={() => setExpandedRoleId(expandedRoleId === role.id ? null : role.id)}>
+                            {expandedRoleId === role.id ? 'Hide ▲' : 'View Permissions ▼'}
+                          </button>
+                        </div>
+                        {expandedRoleId === role.id && (
+                          <div style={{ marginTop: '1rem', width: '100%' }}>
+                            {Object.entries(
+                              (role.role_permissions || []).reduce((acc: any, rp: any) => {
+                                const mod = rp.permission.module;
+                                if (!acc[mod]) acc[mod] = [];
+                                acc[mod].push(rp.permission);
+                                return acc;
+                              }, {})
+                            ).map(([mod, perms]: any) => (
+                              <div key={mod} style={{ marginBottom: '0.75rem' }}>
+                                <div style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--primary)', textTransform: 'uppercase', marginBottom: '0.35rem' }}>{mod.replace(/_/g, ' ')}</div>
+                                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.4rem' }}>
+                                  {perms.map((p: any) => (
+                                    <span key={p.id} style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: '4px', padding: '0.15rem 0.5rem', fontSize: '0.75rem', color: 'var(--text-light)' }}>{p.action}</span>
+                                  ))}
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                </div>
+
+                {/* TENANT roles */}
+                <h3 style={{ fontSize: '1rem', color: 'var(--text-light)', marginBottom: '0.75rem', textTransform: 'uppercase', letterSpacing: '0.05em' }}>🏢 Custom Tenant Roles</h3>
+                <div className="ck-list">
+                  {tenantRoles.filter(r => r.role_scope === 'TENANT').length === 0
+                    ? <div className="ck-empty">No custom roles yet. <button className="ck-link-btn" onClick={() => setRolesSubTab('new-request')}>Request one →</button></div>
+                    : tenantRoles.filter(r => r.role_scope === 'TENANT').map(role => (
+                      <div key={role.id} className="ck-list-item" style={{ flexDirection: 'column' }}>
+                        <div style={{ display: 'flex', width: '100%', justifyContent: 'space-between', alignItems: 'center' }}>
+                          <div className="ck-list-item-main">
+                            <div className="ck-list-item-title">
+                              {role.name}
+                              <span style={{ marginLeft: '0.5rem', background: 'var(--primary)', color: '#fff', borderRadius: '999px', padding: '0.1rem 0.5rem', fontSize: '0.7rem' }}>v{role.current_version}</span>
+                            </div>
+                            <div className="ck-list-item-meta">
+                              <span style={{ color: 'var(--text-light)', fontSize: '0.8rem' }}>{role.role_permissions?.length ?? 0} permissions · {role.type}</span>
+                            </div>
+                          </div>
+                          <button className="ck-btn-edit" onClick={() => setExpandedRoleId(expandedRoleId === role.id ? null : role.id)}>
+                            {expandedRoleId === role.id ? 'Hide ▲' : 'View ▼'}
+                          </button>
+                        </div>
+                        {expandedRoleId === role.id && (
+                          <div style={{ marginTop: '1rem', width: '100%' }}>
+                            {Object.entries(
+                              (role.role_permissions || []).reduce((acc: any, rp: any) => {
+                                const mod = rp.permission.module;
+                                if (!acc[mod]) acc[mod] = [];
+                                acc[mod].push(rp.permission);
+                                return acc;
+                              }, {})
+                            ).map(([mod, perms]: any) => (
+                              <div key={mod} style={{ marginBottom: '0.75rem' }}>
+                                <div style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--primary)', textTransform: 'uppercase', marginBottom: '0.35rem' }}>{mod.replace(/_/g, ' ')}</div>
+                                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.4rem' }}>
+                                  {perms.map((p: any) => (
+                                    <span key={p.id} style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: '4px', padding: '0.15rem 0.5rem', fontSize: '0.75rem', color: 'var(--text-light)' }}>{p.action}</span>
+                                  ))}
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    ))}
                 </div>
               </div>
             )}
 
-            {/* GRN Modal */}
-            {grnModal && (
-              <div className="plan-overlay" onClick={() => setGrnModal(null)}>
-                <div className="plan-modal" onClick={e => e.stopPropagation()} style={{ maxWidth: '600px' }}>
-                  <div className="plan-modal-header">
-                    <h3>📦 Receive Goods — {grnModal.po_number}</h3>
-                    <button className="inv-modal-close" onClick={() => setGrnModal(null)}>✕</button>
+            {/* ── ROLE REQUESTS TAB ── */}
+            {!rolesLoading && rolesSubTab === 'requests' && (
+              <div>
+                {roleRequests.length === 0
+                  ? <div className="ck-empty">No role requests yet.</div>
+                  : <div className="ck-list">
+                      {roleRequests.map(req => (
+                        <div key={req.id} className="ck-list-item" style={{ flexDirection: 'column' }}>
+                          <div style={{ display: 'flex', width: '100%', justifyContent: 'space-between', alignItems: 'center' }}>
+                            <div className="ck-list-item-main">
+                              <div className="ck-list-item-title">
+                                {req.role_name}
+                                <span style={{ marginLeft: '0.5rem', borderRadius: '999px', padding: '0.15rem 0.55rem', fontSize: '0.72rem', fontWeight: 600,
+                                  background: req.status === 'PENDING' ? '#fff8e1' : req.status === 'APPROVED' ? '#e8f5e9' : '#fce4ec',
+                                  color: req.status === 'PENDING' ? '#f57c00' : req.status === 'APPROVED' ? '#388e3c' : '#c62828'
+                                }}>
+                                  {req.status === 'PENDING' ? '🟡 Pending' : req.status === 'APPROVED' ? '🟢 Approved' : '🔴 Rejected'}
+                                </span>
+                              </div>
+                              <div className="ck-list-item-meta">
+                                <span style={{ fontSize: '0.8rem', color: 'var(--text-light)' }}>Type: {req.role_type} · Submitted: {new Date(req.created_at).toLocaleDateString()}</span>
+                              </div>
+                            </div>
+                            <button className="ck-btn-edit" onClick={() => setExpandedReqId(expandedReqId === req.id ? null : req.id)}>
+                              {expandedReqId === req.id ? 'Less ▲' : 'Details ▼'}
+                            </button>
+                          </div>
+                          {expandedReqId === req.id && (
+                            <div style={{ marginTop: '0.75rem', padding: '1rem', background: 'var(--surface)', borderRadius: '8px', width: '100%' }}>
+                              {req.description && <p style={{ color: 'var(--text-light)', marginBottom: '0.5rem' }}>{req.description}</p>}
+                              <div style={{ fontSize: '0.8rem', color: 'var(--text-light)', marginBottom: '0.25rem' }}>
+                                Requested permissions: <strong>{(req.requested_permissions as string[]).join(', ') || '—'}</strong>
+                              </div>
+                              {req.status === 'REJECTED' && req.remarks && (
+                                <div style={{ marginTop: '0.5rem', padding: '0.5rem 0.75rem', background: '#fce4ec', borderRadius: '6px', color: '#c62828', fontSize: '0.85rem' }}>
+                                  <strong>Rejection reason:</strong> {req.remarks}
+                                </div>
+                              )}
+                              {req.status === 'APPROVED' && req.approvedRole && (
+                                <div style={{ marginTop: '0.5rem', color: '#388e3c', fontSize: '0.85rem' }}>
+                                  ✓ Role created: <strong>{req.approvedRole.name}</strong>
+                                </div>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                }
+              </div>
+            )}
+
+            {/* ── NEW ROLE REQUEST FORM ── */}
+            {rolesSubTab === 'new-request' && (
+              <div style={{ maxWidth: '720px' }}>
+                <h3 style={{ marginBottom: '1.25rem' }}>📝 Request a New Role</h3>
+                {roleReqSuccess && <div style={{ padding: '0.75rem 1rem', background: '#e8f5e9', color: '#388e3c', borderRadius: '8px', marginBottom: '1rem' }}>{roleReqSuccess}</div>}
+                {roleReqError && <div style={{ padding: '0.75rem 1rem', background: '#fce4ec', color: '#c62828', borderRadius: '8px', marginBottom: '1rem' }}>{roleReqError}</div>}
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
+                  <div className="ck-field">
+                    <label>Role Name <span className="req">*</span></label>
+                    <input className="ck-input" value={roleReqForm.role_name} onChange={e => setRoleReqForm(f => ({ ...f, role_name: e.target.value }))} placeholder="e.g. Senior Kitchen Manager" />
                   </div>
-                  <div className="plan-modal-body">
-                    <p style={{ margin: '0 0 1rem', fontSize: '0.85rem', color: 'var(--text-light)' }}>Vendor: {grnModal.vendor.name} — Fill in the received batch details below.</p>
-                    {grnForm.map((item, idx) => (
-                      <div key={idx} style={{ borderBottom: '1px solid var(--border)', paddingBottom: '1rem', marginBottom: '1rem' }}>
-                        <div style={{ fontWeight: 600, marginBottom: '0.5rem' }}>{item.name}</div>
-                        <div className="ck-form-grid">
-                          <div className="ck-field">
-                            <label>Qty to Receive *</label>
-                            <input className="ck-input" type="number" step="0.01" value={item.received_qty}
-                              onChange={e => { const f = [...grnForm]; f[idx].received_qty = e.target.value; setGrnForm(f); }} />
-                          </div>
-                          <div className="ck-field">
-                            <label>Batch No</label>
-                            <input className="ck-input" value={item.batch_no} placeholder="Auto if blank"
-                              onChange={e => { const f = [...grnForm]; f[idx].batch_no = e.target.value; setGrnForm(f); }} />
-                          </div>
-                          <div className="ck-field">
-                            <label>Expiry Date</label>
-                            <input className="ck-input" type="date" value={item.expiry_date}
-                              onChange={e => { const f = [...grnForm]; f[idx].expiry_date = e.target.value; setGrnForm(f); }} />
-                          </div>
-                          <div className="ck-field">
-                            <label>Purchase Price/unit (₹)</label>
-                            <input className="ck-input" type="number" step="0.01" value={item.purchase_price}
-                              onChange={e => { const f = [...grnForm]; f[idx].purchase_price = e.target.value; setGrnForm(f); }} />
-                          </div>
+                  <div className="ck-field">
+                    <label>Description</label>
+                    <textarea className="ck-input" rows={2} value={roleReqForm.description} onChange={e => setRoleReqForm(f => ({ ...f, description: e.target.value }))} placeholder="What is this role responsible for?" />
+                  </div>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
+                    <div className="ck-field">
+                      <label>Role Type <span className="req">*</span></label>
+                      <select className="ck-input" value={roleReqForm.role_type} onChange={e => setRoleReqForm(f => ({ ...f, role_type: e.target.value }))}>
+                        <option value="CENTRAL_KITCHEN">Central Kitchen</option>
+                        <option value="RESTAURANT">Restaurant</option>
+                      </select>
+                    </div>
+                    <div className="ck-field">
+                      <label>Use Template (optional)</label>
+                      <select className="ck-input" value={roleReqForm.template_role_id}
+                        onChange={async e => {
+                          const tid = e.target.value;
+                          setRoleReqForm(f => ({ ...f, template_role_id: tid }));
+                          if (tid) {
+                            try {
+                              const res = await fetch(`${API}/roles/templates/${tid}/clone`, { headers: { Authorization: `Bearer ${accessToken}` } });
+                              const data = await res.json();
+                              setRoleReqForm(f => ({ ...f, permission_codes: data.data.permission_codes || [] }));
+                            } catch {}
+                          }
+                        }}>
+                        <option value="">— No template —</option>
+                        {templates.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+                      </select>
+                    </div>
+                  </div>
+
+                  {/* Permission Matrix */}
+                  <div className="ck-field">
+                    <label style={{ marginBottom: '0.75rem', display: 'block' }}>Permissions</label>
+                    {Object.entries(
+                      allPermissions.reduce((acc: any, p: any) => {
+                        if (!acc[p.module]) acc[p.module] = [];
+                        acc[p.module].push(p);
+                        return acc;
+                      }, {})
+                    ).map(([mod, perms]: any) => (
+                      <div key={mod} style={{ marginBottom: '1rem' }}>
+                        <div style={{ fontWeight: 600, fontSize: '0.82rem', color: 'var(--primary)', textTransform: 'uppercase', marginBottom: '0.5rem' }}>{mod.replace(/_/g, ' ')}</div>
+                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem' }}>
+                          {perms.map((p: any) => {
+                            const checked = roleReqForm.permission_codes.includes(p.code);
+                            return (
+                              <label key={p.id} style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', cursor: 'pointer',
+                                background: checked ? 'rgba(99,102,241,0.12)' : 'var(--surface)',
+                                border: `1px solid ${checked ? 'var(--primary)' : 'var(--border)'}`,
+                                borderRadius: '6px', padding: '0.3rem 0.65rem', fontSize: '0.78rem', transition: 'all 0.15s' }}>
+                                <input type="checkbox" checked={checked}
+                                  onChange={e => setRoleReqForm(f => ({
+                                    ...f,
+                                    permission_codes: e.target.checked
+                                      ? [...f.permission_codes, p.code]
+                                      : f.permission_codes.filter(c => c !== p.code)
+                                  }))}
+                                  style={{ accentColor: 'var(--primary)' }} />
+                                {p.action}
+                              </label>
+                            );
+                          })}
                         </div>
                       </div>
                     ))}
-                    {purchaseErr && <div className="plan-error">{purchaseErr}</div>}
                   </div>
-                  <div className="plan-modal-footer">
-                    <button className="ck-btn-cancel-sm" onClick={() => setGrnModal(null)}>Cancel</button>
-                    <button className="ck-btn-add" disabled={planActionLoading} onClick={submitGRN}>
-                      {planActionLoading ? '...' : '✓ Confirm Receipt & Update Inventory'}
-                    </button>
-                  </div>
-                </div>
-              </div>
-            )}
 
-            {/* Add Vendor Modal */}
-            {showVendorForm && (
-              <div className="plan-overlay" onClick={() => setShowVendorForm(false)}>
-                <div className="plan-modal" onClick={e => e.stopPropagation()} style={{ maxWidth: '450px' }}>
-                  <div className="plan-modal-header">
-                    <h3>🏢 Add Vendor</h3>
-                    <button className="inv-modal-close" onClick={() => setShowVendorForm(false)}>✕</button>
-                  </div>
-                  <div className="plan-modal-body">
-                    <div className="ck-form-grid">
-                      <div className="ck-field ck-field--full"><label>Vendor Name *</label><input className="ck-input" required value={vendorForm.name} onChange={e => setVendorForm(f => ({ ...f, name: e.target.value }))} /></div>
-                      <div className="ck-field"><label>Contact Number</label><input className="ck-input" value={vendorForm.contact_number} onChange={e => setVendorForm(f => ({ ...f, contact_number: e.target.value }))} /></div>
-                      <div className="ck-field"><label>GST Number</label><input className="ck-input" value={vendorForm.gst_number} onChange={e => setVendorForm(f => ({ ...f, gst_number: e.target.value }))} /></div>
-                      <div className="ck-field"><label>Payment Terms</label><input className="ck-input" value={vendorForm.payment_terms} onChange={e => setVendorForm(f => ({ ...f, payment_terms: e.target.value }))} /></div>
-                      <div className="ck-field ck-field--full"><label>Address</label><input className="ck-input" value={vendorForm.address} onChange={e => setVendorForm(f => ({ ...f, address: e.target.value }))} /></div>
-                    </div>
-                  </div>
-                  <div className="plan-modal-footer">
-                    <button className="ck-btn-cancel-sm" onClick={() => setShowVendorForm(false)}>Cancel</button>
-                    <button className="ck-btn-add" onClick={async () => {
-                      try {
-                        await axios.post(`${API}/purchase/vendors`, vendorForm, { headers: authHeader });
-                        setShowVendorForm(false);
-                        await fetchPurchaseData();
-                        setPurchaseMsg('✓ Vendor added!');
-                        setTimeout(() => setPurchaseMsg(''), 3000);
-                      } catch (err: any) { setPurchaseErr(err.response?.data?.message ?? 'Failed'); }
-                    }}>Save Vendor</button>
+                  <div style={{ display: 'flex', gap: '1rem', justifyContent: 'flex-end' }}>
+                    <button className="ck-btn-cancel" onClick={() => setRolesSubTab('my-roles')}>Cancel</button>
+                    <button className="ck-btn-submit" disabled={roleReqSubmitting}
+                      onClick={async () => {
+                        setRoleReqError('');
+                        setRoleReqSuccess('');
+                        if (!roleReqForm.role_name) { setRoleReqError('Role name is required'); return; }
+                        setRoleReqSubmitting(true);
+                        try {
+                          await fetch(`${API}/roles/requests`, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${accessToken}` },
+                            body: JSON.stringify(roleReqForm),
+                          });
+                          setRoleReqSuccess('✓ Role request submitted successfully!');
+                          setRoleReqForm({ role_name: '', description: '', role_type: 'CENTRAL_KITCHEN', template_role_id: '', permission_codes: [] });
+                          await loadRolesData();
+                          setTimeout(() => setRolesSubTab('requests'), 1500);
+                        } catch (err: any) {
+                          setRoleReqError(err.message || 'Submission failed');
+                        } finally {
+                          setRoleReqSubmitting(false);
+                        }
+                      }}>
+                      {roleReqSubmitting ? 'Submitting…' : '✓ Submit Request'}
+                    </button>
                   </div>
                 </div>
               </div>
@@ -2010,6 +2078,272 @@ export default function CentralKitchenHome() {
           </div>
         )}
       </main>
+
+      {/* ── PLAN PRODUCTION MODAL OVERLAY ── */}
+      {showPlanModal && (
+        <div className="plan-overlay" onClick={() => setShowPlanModal(false)}>
+          <div className="plan-modal" onClick={e => e.stopPropagation()}>
+            <div className="plan-modal-header">
+              <h3>🏭 Plan Production — {planningProductName}</h3>
+              <button className="inv-modal-close" onClick={() => setShowPlanModal(false)}>✕</button>
+            </div>
+            <div className="plan-modal-body">
+              {/* Buffer & Preview trigger */}
+              <div className="plan-buffer-row">
+                <label className="plan-label">Production Buffer Quantity</label>
+                <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center' }}>
+                  <input className="plan-input" type="number" min="0" step="1" value={planBufferQty}
+                    onChange={e => setPlanBufferQty(e.target.value)}
+                    placeholder="e.g. 15" style={{ width: '100px' }} />
+                  <button className="ck-btn-add" onClick={runPreview} disabled={planPreviewLoading}>
+                    {planPreviewLoading ? '⟳ Calculating…' : '📊 Calculate Plan'}
+                  </button>
+                </div>
+              </div>
+
+              {planPreviewError && <div className="plan-error">{planPreviewError}</div>}
+              {planSaveSuccess && <div className="plan-success">{planSaveSuccess}</div>}
+
+              {planPreview && (
+                <>
+                  {/* ── Restaurant Demand ── */}
+                  <div className="plan-section-title">🏪 Restaurant Demand Breakdown</div>
+                  <div className="plan-restaurant-grid">
+                    {planPreview.restaurant_demand.map((r, i) => (
+                      <div key={i} className="plan-restaurant-card">
+                        <div className="plan-restaurant-name">{r.restaurant_name}</div>
+                        <div className="plan-restaurant-qty">{r.quantity} <span className="plan-unit">{planPreview.raw_material_requirements[0]?.unit_symbol || 'dishes'}</span></div>
+                      </div>
+                    ))}
+                  </div>
+
+                  {/* ── Production Calculation ── */}
+                  <div className="plan-section-title">📐 Production Calculation</div>
+                  <div className="plan-calc-row">
+                    <div className="plan-calc-box plan-calc-blue">
+                      <div className="plan-calc-label">Total Demand</div>
+                      <div className="plan-calc-value">{planPreview.total_demand}</div>
+                    </div>
+                    <div className="plan-calc-op">+</div>
+                    <div className="plan-calc-box plan-calc-amber">
+                      <div className="plan-calc-label">Buffer</div>
+                      <div className="plan-calc-value">{planPreview.buffer_qty}</div>
+                    </div>
+                    <div className="plan-calc-op">−</div>
+                    <div className="plan-calc-box plan-calc-teal">
+                      <div className="plan-calc-label">Finished Stock</div>
+                      <div className="plan-calc-value">{planPreview.finished_stock}</div>
+                    </div>
+                    <div className="plan-calc-op">=</div>
+                    <div className="plan-calc-box plan-calc-green">
+                      <div className="plan-calc-label">Required Production</div>
+                      <div className="plan-calc-value plan-calc-main">{planPreview.required_qty}</div>
+                    </div>
+                  </div>
+
+                  {/* ── Material Summary Badge ── */}
+                  {planPreview.has_recipe && (
+                    <div className="plan-summary-row">
+                      <span className="plan-summary-badge plan-summary-ok">✓ {planPreview.summary.available} Materials Available</span>
+                      {planPreview.summary.short > 0 && <span className="plan-summary-badge plan-summary-short">⚠ {planPreview.summary.short} Materials Short</span>}
+                    </div>
+                  )}
+
+                  {/* ── Raw Material Requirements ── */}
+                  {planPreview.has_recipe ? (
+                    <>
+                      <div className="plan-section-title">🧪 Raw Material Requirements (FEFO Allocation)</div>
+                      <div className="plan-rm-table">
+                        <div className="plan-rm-head">
+                          <span>Material</span><span>Required</span><span>Available</span><span>Status</span><span>FEFO Batches</span>
+                        </div>
+                        {planPreview.raw_material_requirements.map((rm) => (
+                          <div key={rm.raw_material_id}>
+                            <div className={`plan-rm-row ${rm.status === 'short' ? 'plan-rm-row--short' : 'plan-rm-row--ok'}`}
+                              onClick={() => setExpandedRMId(expandedRMId === rm.raw_material_id ? null : rm.raw_material_id)}
+                              style={{ cursor: 'pointer' }}>
+                              <span><strong>{rm.raw_material_name}</strong></span>
+                              <span>{rm.required_qty.toFixed(2)} {rm.unit_symbol}</span>
+                              <span>{rm.available_qty.toFixed(2)} {rm.unit_symbol}</span>
+                              <span>
+                                {rm.status === 'short'
+                                  ? <span className="plan-short-badge">⚠ Short by {rm.shortage.toFixed(2)} {rm.unit_symbol}</span>
+                                  : <span className="plan-ok-badge">✓ Enough</span>}
+                              </span>
+                              <span style={{ fontSize: '0.75rem', color: 'var(--text-light)' }}>
+                                {rm.fefo_allocations.length} batch(es) {expandedRMId === rm.raw_material_id ? '▲' : '▼'}
+                              </span>
+                            </div>
+                            {expandedRMId === rm.raw_material_id && rm.fefo_allocations.length > 0 && (
+                              <div className="plan-fefo-list fade-in">
+                                {rm.fefo_allocations.map((a, ai) => (
+                                  <div key={ai} className="plan-fefo-row">
+                                    <span>Batch #{a.batch_no || a.batch_id}</span>
+                                    <span>Expires: {a.expiry_date ? new Date(a.expiry_date).toLocaleDateString('en-IN') : 'No expiry'}</span>
+                                    <span className="plan-fefo-alloc">Allocate: {a.allocated_qty.toFixed(2)} {rm.unit_symbol}</span>
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    </>
+                  ) : (
+                    <div className="plan-no-recipe">⚠️ No active recipe/BOM configured for this product. Set up a recipe under the Products tab first.</div>
+                  )}
+                </>
+              )}
+            </div>
+            <div className="plan-modal-footer">
+              <button className="ck-btn-cancel-sm" onClick={() => setShowPlanModal(false)}>Close</button>
+              {planPreview && planPreview.has_recipe && !planSaveSuccess && (
+                <button className="ck-btn-add" onClick={saveDraftPlan} disabled={savingPlan}>
+                  {savingPlan ? 'Saving…' : '💾 Save Draft Plan'}
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Approve Request Modal */}
+      {approveModal && (
+        <div className="plan-overlay" onClick={() => setApproveModal(null)}>
+          <div className="plan-modal" onClick={e => e.stopPropagation()} style={{ maxWidth: '500px' }}>
+            <div className="plan-modal-header">
+              <h3>✓ Approve Purchase Request</h3>
+              <button className="inv-modal-close" onClick={() => setApproveModal(null)}>✕</button>
+            </div>
+            <div className="plan-modal-body">
+              <p style={{ margin: '0 0 1rem', color: 'var(--text-light)', fontSize: '0.9rem' }}>
+                Material: <strong>{approveModal.requirement.rawMaterial.name}</strong> — Needed: <strong>{Number(approveModal.requirement.purchase_needed_qty).toFixed(2)} {approveModal.requirement.rawMaterial.unit?.symbol || ''}</strong>
+              </p>
+              <div className="plan-buffer-row">
+                <label className="plan-label">Vendor *</label>
+                <select className="ck-select" style={{ marginTop: '0.25rem' }} value={approveForm.vendor_id} onChange={e => setApproveForm(f => ({ ...f, vendor_id: e.target.value }))}>
+                  <option value="">— Select Vendor —</option>
+                  {vendors.map(v => <option key={v.id} value={v.id}>{v.name}</option>)}
+                </select>
+              </div>
+              <div className="plan-buffer-row">
+                <label className="plan-label">Quantity to Purchase</label>
+                <input className="plan-input" type="number" step="0.01" value={approveForm.modified_qty} onChange={e => setApproveForm(f => ({ ...f, modified_qty: e.target.value }))} />
+              </div>
+              <div className="plan-buffer-row">
+                <label className="plan-label">Unit Price (₹) *</label>
+                <input className="plan-input" type="number" step="0.01" value={approveForm.unit_price} onChange={e => setApproveForm(f => ({ ...f, unit_price: e.target.value }))} />
+              </div>
+              <div className="plan-buffer-row">
+                <label className="plan-label">Expected Delivery Date</label>
+                <input className="plan-input" type="date" value={approveForm.expected_delivery_date} onChange={e => setApproveForm(f => ({ ...f, expected_delivery_date: e.target.value }))} />
+              </div>
+              {purchaseErr && <div className="plan-error">{purchaseErr}</div>}
+            </div>
+            <div className="plan-modal-footer">
+              <button className="ck-btn-cancel-sm" onClick={() => setApproveModal(null)}>Cancel</button>
+              <button className="ck-btn-add" disabled={planActionLoading || !approveForm.vendor_id || !approveForm.unit_price}
+                onClick={async () => {
+                  setPlanActionLoading(true);
+                  setPurchaseErr('');
+                  try {
+                    await axios.post(`${API}/purchase/requests/${approveModal.id}/approve`, approveForm, { headers: authHeader });
+                    setApproveModal(null);
+                    setPurchaseMsg('✓ Purchase Order created!');
+                    await fetchPurchaseData();
+                    setTimeout(() => setPurchaseMsg(''), 4000);
+                  } catch (err: any) {
+                    setPurchaseErr(err.response?.data?.message ?? 'Approval failed');
+                  } finally { setPlanActionLoading(false); }
+                }}>
+                {planActionLoading ? '...' : '✓ Approve & Create PO'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* GRN Modal */}
+      {grnModal && (
+        <div className="plan-overlay" onClick={() => setGrnModal(null)}>
+          <div className="plan-modal" onClick={e => e.stopPropagation()} style={{ maxWidth: '600px' }}>
+            <div className="plan-modal-header">
+              <h3>📦 Receive Goods — {grnModal.po_number}</h3>
+              <button className="inv-modal-close" onClick={() => setGrnModal(null)}>✕</button>
+            </div>
+            <div className="plan-modal-body">
+              <p style={{ margin: '0 0 1rem', fontSize: '0.85rem', color: 'var(--text-light)' }}>Vendor: {grnModal.vendor.name} — Fill in the received batch details below.</p>
+              {grnForm.map((item, idx) => (
+                <div key={idx} style={{ borderBottom: '1px solid var(--border)', paddingBottom: '1rem', marginBottom: '1rem' }}>
+                  <div style={{ fontWeight: 600, marginBottom: '0.5rem' }}>{item.name}</div>
+                  <div className="ck-form-grid">
+                    <div className="ck-field">
+                      <label>Qty to Receive *</label>
+                      <input className="ck-input" type="number" step="0.01" value={item.received_qty}
+                        onChange={e => { const f = [...grnForm]; f[idx].received_qty = e.target.value; setGrnForm(f); }} />
+                    </div>
+                    <div className="ck-field">
+                      <label>Batch No</label>
+                      <input className="ck-input" value={item.batch_no} placeholder="Auto if blank"
+                        onChange={e => { const f = [...grnForm]; f[idx].batch_no = e.target.value; setGrnForm(f); }} />
+                    </div>
+                    <div className="ck-field">
+                      <label>Expiry Date</label>
+                      <input className="ck-input" type="date" value={item.expiry_date}
+                        onChange={e => { const f = [...grnForm]; f[idx].expiry_date = e.target.value; setGrnForm(f); }} />
+                    </div>
+                    <div className="ck-field">
+                      <label>Purchase Price/unit (₹)</label>
+                      <input className="ck-input" type="number" step="0.01" value={item.purchase_price}
+                        onChange={e => { const f = [...grnForm]; f[idx].purchase_price = e.target.value; setGrnForm(f); }} />
+                    </div>
+                  </div>
+                </div>
+              ))}
+              {purchaseErr && <div className="plan-error">{purchaseErr}</div>}
+            </div>
+            <div className="plan-modal-footer">
+              <button className="ck-btn-cancel-sm" onClick={() => setGrnModal(null)}>Cancel</button>
+              <button className="ck-btn-add" disabled={planActionLoading} onClick={submitGRN}>
+                {planActionLoading ? '...' : '✓ Confirm Receipt & Update Inventory'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Add Vendor Modal */}
+      {showVendorForm && (
+        <div className="plan-overlay" onClick={() => setShowVendorForm(false)}>
+          <div className="plan-modal" onClick={e => e.stopPropagation()} style={{ maxWidth: '450px' }}>
+            <div className="plan-modal-header">
+              <h3>🏢 Add Vendor</h3>
+              <button className="inv-modal-close" onClick={() => setShowVendorForm(false)}>✕</button>
+            </div>
+            <div className="plan-modal-body">
+              <div className="ck-form-grid">
+                <div className="ck-field ck-field--full"><label>Vendor Name *</label><input className="ck-input" required value={vendorForm.name} onChange={e => setVendorForm(f => ({ ...f, name: e.target.value }))} /></div>
+                <div className="ck-field"><label>Contact Number</label><input className="ck-input" value={vendorForm.contact_number} onChange={e => setVendorForm(f => ({ ...f, contact_number: e.target.value }))} /></div>
+                <div className="ck-field"><label>GST Number</label><input className="ck-input" value={vendorForm.gst_number} onChange={e => setVendorForm(f => ({ ...f, gst_number: e.target.value }))} /></div>
+                <div className="ck-field"><label>Payment Terms</label><input className="ck-input" value={vendorForm.payment_terms} onChange={e => setVendorForm(f => ({ ...f, payment_terms: e.target.value }))} /></div>
+                <div className="ck-field ck-field--full"><label>Address</label><input className="ck-input" value={vendorForm.address} onChange={e => setVendorForm(f => ({ ...f, address: e.target.value }))} /></div>
+              </div>
+            </div>
+            <div className="plan-modal-footer">
+              <button className="ck-btn-cancel-sm" onClick={() => setShowVendorForm(false)}>Cancel</button>
+              <button className="ck-btn-add" onClick={async () => {
+                try {
+                  await axios.post(`${API}/purchase/vendors`, vendorForm, { headers: authHeader });
+                  setShowVendorForm(false);
+                  await fetchPurchaseData();
+                  setPurchaseMsg('✓ Vendor added!');
+                  setTimeout(() => setPurchaseMsg(''), 3000);
+                } catch (err: any) { setPurchaseErr(err.response?.data?.message ?? 'Failed'); }
+              }}>Save Vendor</button>
+            </div>
+          </div>
+        </div>
+      )}
       </div>{/* end ck-layout */}
     </div>
   );

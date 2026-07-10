@@ -2,7 +2,11 @@ import { Request, Response } from 'express';
 import prisma from '../utils/prisma';
 
 // Helper to get tenantId and restaurantId from auth middleware
-const getTenantId = (req: Request): number => (req as any).tenantId;
+const getTenantId = (req: Request): number => {
+  const tenantId = (req as any).tenantId;
+  if (!tenantId) throw new Error('Central Kitchen tenant scope is required');
+  return tenantId;
+};
 const getRestaurantId = (req: Request): number | null => {
   const user = (req as any).user;
   return user?.restaurant_id ? Number(user.restaurant_id) : null;

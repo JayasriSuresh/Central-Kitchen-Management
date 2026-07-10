@@ -2357,3 +2357,83 @@ body {
   .plan-rm-head, .plan-rm-row { grid-template-columns: 1fr 1fr; }
   .plan-detail-stats { grid-template-columns: repeat(2, 1fr); }
 }
+
+/* ══════════════════════════════════════════════════════════════
+   RBAC — Role Management Section
+   ══════════════════════════════════════════════════════════════ */
+
+/* Tab strip */
+.ck-tabs {
+  display: flex;
+  gap: 0.25rem;
+  border-bottom: 2px solid var(--border);
+  padding-bottom: 0;
+}
+
+.ck-tab {
+  padding: 0.5rem 1.25rem;
+  border: none;
+  background: transparent;
+  color: var(--text-light);
+  font-size: 0.9rem;
+  font-weight: 500;
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -2px;
+  transition: color 0.15s, border-color 0.15s;
+  border-radius: var(--radius) var(--radius) 0 0;
+}
+.ck-tab:hover { color: var(--text); background: var(--surface); }
+.ck-tab--active {
+  color: var(--primary);
+  border-bottom-color: var(--primary);
+  font-weight: 600;
+}
+
+/* Inline link button */
+.ck-link-btn {
+  background: none;
+  border: none;
+  color: var(--primary);
+  cursor: pointer;
+  font-size: inherit;
+  font-weight: 600;
+  text-decoration: underline;
+  padding: 0;
+}
+.ck-link-btn:hover { opacity: 0.8; }
+
+/* Role permission chip */
+.role-perm-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 0.15rem 0.5rem;
+  font-size: 0.75rem;
+  color: var(--text-light);
+}
+
+/* Status pill reuse */
+.status-pill {
+  display: inline-block;
+  border-radius: 999px;
+  padding: 0.15rem 0.55rem;
+  font-size: 0.72rem;
+  font-weight: 600;
+}
+.status-pill--pending  { background: #fff8e1; color: #f57c00; }
+.status-pill--approved { background: #e8f5e9; color: #388e3c; }
+.status-pill--rejected { background: #fce4ec; color: #c62828; }
+
+/* Permission matrix module header */
+.perm-module-header {
+  font-weight: 600;
+  font-size: 0.8rem;
+  color: var(--primary);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-bottom: 0.5rem;
+}

@@ -2,7 +2,11 @@ import { Request, Response } from 'express';
 import prisma from '../utils/prisma';
 import { Prisma } from '@prisma/client';
 
-const getTenantId = (req: Request): number => (req as any).tenantId;
+const getTenantId = (req: Request): number => {
+  const tenantId = (req as any).tenantId;
+  if (!tenantId) throw new Error('Central Kitchen tenant scope is required');
+  return tenantId;
+};
 const getUser = (req: Request) => (req as any).user as { id: number; username: string; user_id: string };
 
 // ──────────────────────────────────────────────────────────────────────────────

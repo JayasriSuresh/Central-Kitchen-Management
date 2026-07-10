@@ -37,37 +37,93 @@ model Tenant {
   attachments        Attachment[]
   login_attempts     LoginAttempt[]
   inventory_batches  InventoryBatch[]
+  role_requests      RoleRequest[]
 
   @@map("tenants")
 }
 
 model Role {
-  id             Int       @id @default(autoincrement())
-  tenant_id      Int?
-  name           String
-  code           String
-  type           String    @default("central_kitchen")
-  is_system_role Boolean   @default(false)
-  is_super_admin Boolean   @default(false)
-  created_at     DateTime  @default(now())
-  deleted_at     DateTime?
+  id              Int       @id @default(autoincrement())
+  tenant_id       Int?
+  name            String
+  code            String
+  // role_scope: GLOBAL (platform-wide) | TENANT (one CK only)
+  role_scope      String    @default("TENANT")
+  // type: CENTRAL_KITCHEN | RESTAURANT  (replaces free-text "central_kitchen", "restaurant", "system")
+  type            String    @default("CENTRAL_KITCHEN")
+  // owner_type: MASTER | TENANT | RESTAURANT — who originally created / requested this role
+  owner_type      String    @default("MASTER")
+  description     String?   @db.Text
+  is_super_admin  Boolean   @default(false)
+  current_version Int       @default(1)
+  status          String    @default("active")
+  created_at      DateTime  @default(now())
+  deleted_at      DateTime?
 
   tenant                Tenant?              @relation(fields: [tenant_id], references: [id])
   role_permissions      RolePermission[]
   user_roles            UserRole[]
   primary_users         User[]               @relation("PrimaryRole")
   restaurant_user_roles RestaurantUserRole[]
+  versions              RoleVersion[]
+  approved_requests     RoleRequest[]        @relation("ApprovedRole")
 
   @@unique([tenant_id, name])
   @@unique([tenant_id, code])
   @@map("roles")
 }
 
+model RoleVersion {
+  id           Int      @id @default(autoincrement())
+  role_id      Int
+  version_no   Int
+  // snapshot: complete array of permission codes at this point in time
+  snapshot     Json
+  change_notes String?  @db.Text
+  changed_by_id Int?
+  changed_at   DateTime @default(now())
+
+  role      Role  @relation(fields: [role_id], references: [id], onDelete: Cascade)
+  changedBy User? @relation("RoleVersionChangedBy", fields: [changed_by_id], references: [id])
+
+  @@unique([role_id, version_no])
+  @@map("role_versions")
+}
+
+model RoleRequest {
+  id                    Int       @id @default(autoincrement())
+  tenant_id             Int?
+  requested_by_id       Int?
+  role_name             String
+  description           String?   @db.Text
+  // role_type mirrors Role.type: CENTRAL_KITCHEN | RESTAURANT
+  role_type             String    @default("CENTRAL_KITCHEN")
+  // template_role_id: if cloned from an existing role
+  template_role_id      Int?
+  // requested_permissions: JSON array of permission codes
+  requested_permissions Json
+  status                String    @default("PENDING")  // PENDING | APPROVED | REJECTED
+  remarks               String?   @db.Text
+  approved_role_id      Int?
+  approved_by_id        Int?
+  approved_at           DateTime?
+  created_at            DateTime  @default(now())
+  updated_at            DateTime  @updatedAt
+
+  tenant       Tenant? @relation(fields: [tenant_id], references: [id])
+  requestedBy  User?   @relation("RoleRequestedBy", fields: [requested_by_id], references: [id])
+  approvedBy   User?   @relation("RoleApprovedBy", fields: [approved_by_id], references: [id])
+  approvedRole Role?   @relation("ApprovedRole", fields: [approved_role_id], references: [id])
+
+  @@map("role_requests")
+}
+
 model Permission {
-  id     Int    @id @default(autoincrement())
-  module String
-  action String
-  code   String @unique
+  id          Int    @id @default(autoincrement())
+  module      String
+  action      String
+  code        String @unique
+  description String?
 
   role_permissions RolePermission[]
 
@@ -148,6 +204,9 @@ model User {
   audit_log_entries        AuditLog[]
   attachments_uploaded     Attachment[]
   dispatches_driven        Dispatch[]
+  role_versions_changed    RoleVersion[]  @relation("RoleVersionChangedBy")
+  role_requests_made       RoleRequest[]  @relation("RoleRequestedBy")
+  role_requests_approved   RoleRequest[]  @relation("RoleApprovedBy")
 
   @@unique([tenant_id, username])
   @@unique([tenant_id, email])

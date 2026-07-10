@@ -4,7 +4,11 @@ import { hashPassword, generateUserId, generateUsername, seedTenantRoles } from 
 import { sendCredentialsEmail } from '../services/email.service';
 
 // Helper: get tenantId from auth middleware
-const getTenantId = (req: Request): number => (req as any).tenantId;
+const getTenantId = (req: Request): number => {
+  const tenantId = (req as any).tenantId;
+  if (!tenantId) throw new Error('Central Kitchen tenant scope is required');
+  return tenantId;
+};
 
 // ─── GET /admin/dropdown-data ─────────────────────────────────────────────────
 export const getDropdownData = async (req: Request, res: Response) => {

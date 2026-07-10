@@ -44,15 +44,41 @@ interface Order {
   total_amount: number;
 }
 
-type Tab = 'new-order' | 'history';
+type Tab = 'new-order' | 'history' | 'roles';
 
 export default function RestaurantHome() {
-  const { user, accessToken, logout } = useAuth();
+  const { user, accessToken, logout, activePortal, workspaces, setAuth } = useAuth();
   const navigate = useNavigate();
 
   const [tab, setTab] = useState<Tab>('new-order');
   const [products, setProducts] = useState<Product[]>([]);
   const [orders, setOrders] = useState<Order[]>([]);
+  const [showUserMenu, setShowUserMenu] = useState(false);
+
+  const handleSwitchWorkspace = async (ws: any) => {
+    try {
+      const res = await axios.post(`${API}/auth/switch-workspace`, {
+        type: ws.type,
+        restaurantId: ws.restaurantId,
+      }, {
+        headers: { Authorization: `Bearer ${accessToken}` }
+      });
+
+      setAuth({
+        user: res.data.user,
+        accessToken: res.data.accessToken,
+        activePortal: ws.type,
+        workspaces: res.data.workspaces,
+      });
+      setShowUserMenu(false);
+      
+      if (ws.type === 'system') navigate('/system');
+      else if (ws.type === 'restaurant') navigate('/restaurant');
+      else navigate('/central-kitchen');
+    } catch (err) {
+      console.error('Failed to switch workspace', err);
+    }
+  };
 
   // Cart quantities state: { [productId]: quantityString }
   const [cartQuantities, setCartQuantities] = useState<{ [id: number]: string }>({});
@@ -72,6 +98,43 @@ export default function RestaurantHome() {
   const [expandedOrderId, setExpandedOrderId] = useState<number | null>(null);
 
   const authHeader = { Authorization: `Bearer ${accessToken}` };
+
+  // ── Roles state ─────────────────────────────────────────────────────────────
+  const [rolesSubTab, setRolesSubTab] = useState<'my-roles' | 'requests' | 'new-request'>('my-roles');
+  const [tenantRoles, setTenantRoles] = useState<any[]>([]);
+  const [roleRequests, setRoleRequests] = useState<any[]>([]);
+  const [allPermissions, setAllPermissions] = useState<any[]>([]);
+  const [templates, setTemplates] = useState<any[]>([]);
+  const [rolesLoading, setRolesLoading] = useState(false);
+  const [expandedRoleId, setExpandedRoleId] = useState<number | null>(null);
+  const [expandedReqId, setExpandedReqId] = useState<number | null>(null);
+  const [roleReqForm, setRoleReqForm] = useState({ role_name: '', description: '', role_type: 'RESTAURANT', template_role_id: '', permission_codes: [] as string[] });
+  const [roleReqError, setRoleReqError] = useState('');
+  const [roleReqSuccess, setRoleReqSuccess] = useState('');
+  const [roleReqSubmitting, setRoleReqSubmitting] = useState(false);
+
+  const loadRolesData = async () => {
+    setRolesLoading(true);
+    try {
+      const [rolesRes, reqsRes, permsRes, tmplRes] = await Promise.all([
+        fetch(`${API}/roles/tenant?type=RESTAURANT`, { headers: { Authorization: `Bearer ${accessToken}` } }),
+        fetch(`${API}/roles/requests`, { headers: { Authorization: `Bearer ${accessToken}` } }),
+        fetch(`${API}/roles/permissions`, { headers: { Authorization: `Bearer ${accessToken}` } }),
+        fetch(`${API}/roles/templates?type=RESTAURANT`, { headers: { Authorization: `Bearer ${accessToken}` } }),
+      ]);
+      const [rolesData, reqsData, permsData, tmplData] = await Promise.all([
+        rolesRes.json(), reqsRes.json(), permsRes.json(), tmplRes.json(),
+      ]);
+      setTenantRoles(rolesData.data || []);
+      setRoleRequests(reqsData.data || []);
+      setAllPermissions(permsData.data || []);
+      setTemplates(tmplData.data || []);
+    } catch (err) {
+      console.error('Failed to load roles data', err);
+    } finally {
+      setRolesLoading(false);
+    }
+  };
 
   const handleLogout = () => { logout(); navigate('/login'); };
 
@@ -176,15 +239,52 @@ export default function RestaurantHome() {
   return (
     <div className="ck-page">
       {/* Navbar */}
-      <nav className="dash-nav">
-        <div className="dash-nav-brand">
-          <span>🍴</span> Restaurant Order Portal
+      <header className="ck-topbar">
+        <div className="ck-topbar-left">
+          <div className="ck-topbar-brand">🍽 Restaurant Order Portal</div>
         </div>
-        <div className="dash-nav-actions">
-          <span className="ck-user-name">{user?.name}</span>
-          <button className="btn-ghost" onClick={handleLogout}>Logout</button>
+        <div className="ck-topbar-right">
+          <div className="ck-user-menu-wrap">
+            <button className="ck-user-btn" onClick={() => setShowUserMenu(m => !m)}>
+              <span className="ck-user-avatar">{user?.name?.charAt(0).toUpperCase()}</span>
+              <span className="ck-user-name-top">{user?.name}</span>
+              <span className="ck-user-caret">▾</span>
+            </button>
+            {showUserMenu && (
+              <div className="ck-user-dropdown" style={{ right: 0, left: 'auto' }}>
+                <div className="ck-user-dropdown-info">
+                  <div className="ck-user-dropdown-name">{user?.name}</div>
+                  <div className="ck-user-dropdown-role">Restaurant Manager</div>
+                </div>
+
+                {workspaces && workspaces.length > 1 && (
+                  <>
+                    <div className="ck-user-dropdown-divider" />
+                    <div style={{ padding: '0.4rem 1rem', fontSize: '0.75rem', color: 'var(--text-light)', fontWeight: 600 }}>Switch Workspace</div>
+                    {workspaces.map((ws: any, idx: number) => {
+                      const isCK = ws.type === 'central_kitchen';
+                      const title = isCK ? 'Central Kitchen' : ws.restaurantName || 'Restaurant Branch';
+                      const isActive = (isCK && activePortal === 'central_kitchen') || (!isCK && activePortal === 'restaurant' && user?.restaurant_id === ws.restaurantId);
+                      if (isActive) return null;
+
+                      return (
+                        <button key={idx} className="ck-user-dropdown-item" onClick={() => handleSwitchWorkspace(ws)} style={{ fontSize: '0.8rem', padding: '0.5rem 1rem' }}>
+                          {isCK ? '🏭' : '🍽'} {title}
+                        </button>
+                      );
+                    })}
+                  </>
+                )}
+
+                <div className="ck-user-dropdown-divider" />
+                <button className="ck-user-dropdown-item ck-user-dropdown-item--danger" onClick={handleLogout}>
+                  Sign out
+                </button>
+              </div>
+            )}
+          </div>
         </div>
-      </nav>
+      </header>
 
       {/* Tabs */}
       <div className="ck-tabs">
@@ -192,13 +292,19 @@ export default function RestaurantHome() {
           className={`ck-tab ${tab === 'new-order' ? 'ck-tab--active' : ''}`}
           onClick={() => setTab('new-order')}
         >
-          🛍 Place Order
+          🛘 Place Order
         </button>
         <button
           className={`ck-tab ${tab === 'history' ? 'ck-tab--active' : ''}`}
           onClick={() => setTab('history')}
         >
           📋 Order History ({orders.length})
+        </button>
+        <button
+          className={`ck-tab ${tab === 'roles' ? 'ck-tab--active' : ''}`}
+          onClick={() => { setTab('roles'); loadRolesData(); }}
+        >
+          🔐 Roles
         </button>
       </div>
 
@@ -421,6 +527,158 @@ export default function RestaurantHome() {
           </div>
         )}
       </main>
+
+      {/* ── ROLES TAB ── */}
+      {tab === 'roles' && (
+        <div style={{ padding: '1.5rem 2rem' }} className="fade-in">
+          <div className="ck-section-header" style={{ marginBottom: '1.25rem' }}>
+            <div>
+              <h2 className="ck-section-title">🔐 Role Management</h2>
+              <p className="ck-section-subtitle">View your restaurant roles and request custom roles</p>
+            </div>
+            {rolesSubTab !== 'new-request' && (
+              <button className="ck-btn-add" onClick={() => { setRolesSubTab('new-request'); loadRolesData(); }}>+ Request New Role</button>
+            )}
+          </div>
+
+          <div className="ck-tabs" style={{ marginBottom: '1.25rem' }}>
+            {(['my-roles', 'requests'] as const).map(st => (
+              <button key={st} className={`ck-tab ${rolesSubTab === st ? 'ck-tab--active' : ''}`}
+                onClick={() => { setRolesSubTab(st); loadRolesData(); }}>
+                {st === 'my-roles' ? 'My Roles' : 'Role Requests'}
+              </button>
+            ))}
+          </div>
+
+          {rolesLoading && <div className="ck-empty">Loading…</div>}
+
+          {/* My Roles */}
+          {!rolesLoading && rolesSubTab === 'my-roles' && (
+            <div>
+              <h3 style={{ fontSize: '0.9rem', color: 'var(--text-light)', marginBottom: '0.6rem', textTransform: 'uppercase' }}>🌐 Global Restaurant Roles</h3>
+              <div className="ck-list" style={{ marginBottom: '1.5rem' }}>
+                {tenantRoles.filter(r => r.role_scope === 'GLOBAL').length === 0
+                  ? <div className="ck-empty">No global roles.</div>
+                  : tenantRoles.filter(r => r.role_scope === 'GLOBAL').map(role => (
+                    <div key={role.id} className="ck-list-item" style={{ flexDirection: 'column' }}>
+                      <div style={{ display: 'flex', width: '100%', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <div className="ck-list-item-main">
+                          <div className="ck-list-item-title">{role.name}<span className="ck-status-badge ck-status-badge--active" style={{ marginLeft: '0.5rem', fontSize: '0.7rem' }}>{role.type}</span></div>
+                          <div className="ck-list-item-meta"><span style={{ fontSize: '0.8rem', color: 'var(--text-light)' }}>{role.role_permissions?.length ?? 0} permissions</span></div>
+                        </div>
+                        <button className="ck-btn-edit" onClick={() => setExpandedRoleId(expandedRoleId === role.id ? null : role.id)}>
+                          {expandedRoleId === role.id ? 'Hide ▲' : 'View ▼'}
+                        </button>
+                      </div>
+                      {expandedRoleId === role.id && (
+                        <div style={{ marginTop: '0.75rem', width: '100%' }}>
+                          {Object.entries((role.role_permissions || []).reduce((acc: any, rp: any) => { const m = rp.permission.module; if (!acc[m]) acc[m] = []; acc[m].push(rp.permission); return acc; }, {})).map(([mod, perms]: any) => (
+                            <div key={mod} style={{ marginBottom: '0.6rem' }}>
+                              <div style={{ fontSize: '0.72rem', fontWeight: 700, color: 'var(--primary)', textTransform: 'uppercase', marginBottom: '0.3rem' }}>{mod.replace(/_/g, ' ')}</div>
+                              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.35rem' }}>{perms.map((p: any) => <span key={p.id} style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: '4px', padding: '0.12rem 0.45rem', fontSize: '0.72rem', color: 'var(--text-light)' }}>{p.action}</span>)}</div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  ))}
+              </div>
+              <h3 style={{ fontSize: '0.9rem', color: 'var(--text-light)', marginBottom: '0.6rem', textTransform: 'uppercase' }}>🏢 Custom Roles</h3>
+              <div className="ck-list">
+                {tenantRoles.filter(r => r.role_scope === 'TENANT').length === 0
+                  ? <div className="ck-empty">No custom roles. <button className="ck-link-btn" onClick={() => setRolesSubTab('new-request')}>Request one →</button></div>
+                  : tenantRoles.filter(r => r.role_scope === 'TENANT').map(role => (
+                    <div key={role.id} className="ck-list-item"><div className="ck-list-item-title">{role.name} <span style={{ background: 'var(--primary)', color: '#fff', borderRadius: '999px', padding: '0.1rem 0.4rem', fontSize: '0.7rem' }}>v{role.current_version}</span></div></div>
+                  ))}
+              </div>
+            </div>
+          )}
+
+          {/* Role Requests */}
+          {!rolesLoading && rolesSubTab === 'requests' && (
+            <div>
+              {roleRequests.length === 0
+                ? <div className="ck-empty">No role requests.</div>
+                : <div className="ck-list">{roleRequests.map(req => (
+                    <div key={req.id} className="ck-list-item" style={{ flexDirection: 'column' }}>
+                      <div style={{ display: 'flex', width: '100%', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <div>
+                          <div className="ck-list-item-title">{req.role_name} <span style={{ borderRadius: '999px', padding: '0.12rem 0.5rem', fontSize: '0.7rem', fontWeight: 600, background: req.status === 'PENDING' ? '#fff8e1' : req.status === 'APPROVED' ? '#e8f5e9' : '#fce4ec', color: req.status === 'PENDING' ? '#f57c00' : req.status === 'APPROVED' ? '#388e3c' : '#c62828' }}>{req.status === 'PENDING' ? '🟡 Pending' : req.status === 'APPROVED' ? '🟢 Approved' : '🔴 Rejected'}</span></div>
+                          <div style={{ fontSize: '0.78rem', color: 'var(--text-light)' }}>Submitted {new Date(req.created_at).toLocaleDateString()}</div>
+                        </div>
+                        <button className="ck-btn-edit" onClick={() => setExpandedReqId(expandedReqId === req.id ? null : req.id)}>{expandedReqId === req.id ? 'Less ▲' : 'Details ▼'}</button>
+                      </div>
+                      {expandedReqId === req.id && (
+                        <div style={{ marginTop: '0.6rem', padding: '0.75rem', background: 'var(--surface)', borderRadius: '8px', width: '100%' }}>
+                          {req.status === 'REJECTED' && req.remarks && <div style={{ background: '#fce4ec', color: '#c62828', padding: '0.5rem 0.75rem', borderRadius: '6px', fontSize: '0.82rem' }}><strong>Reason:</strong> {req.remarks}</div>}
+                          {req.status === 'APPROVED' && req.approvedRole && <div style={{ color: '#388e3c', fontSize: '0.82rem' }}>✓ Role created: <strong>{req.approvedRole.name}</strong></div>}
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              }
+            </div>
+          )}
+
+          {/* New Request Form */}
+          {rolesSubTab === 'new-request' && (
+            <div style={{ maxWidth: '640px' }}>
+              <h3 style={{ marginBottom: '1rem' }}>Request a New Restaurant Role</h3>
+              {roleReqSuccess && <div style={{ padding: '0.65rem 1rem', background: '#e8f5e9', color: '#388e3c', borderRadius: '8px', marginBottom: '0.75rem' }}>{roleReqSuccess}</div>}
+              {roleReqError && <div style={{ padding: '0.65rem 1rem', background: '#fce4ec', color: '#c62828', borderRadius: '8px', marginBottom: '0.75rem' }}>{roleReqError}</div>}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+                <div className="ck-field"><label>Role Name *</label><input className="ck-input" value={roleReqForm.role_name} onChange={e => setRoleReqForm(f => ({ ...f, role_name: e.target.value }))} /></div>
+                <div className="ck-field"><label>Description</label><textarea className="ck-input" rows={2} value={roleReqForm.description} onChange={e => setRoleReqForm(f => ({ ...f, description: e.target.value }))} /></div>
+                <div className="ck-field">
+                  <label>Use Template</label>
+                  <select className="ck-input" value={roleReqForm.template_role_id} onChange={async e => {
+                    const tid = e.target.value;
+                    setRoleReqForm(f => ({ ...f, template_role_id: tid }));
+                    if (tid) {
+                      try {
+                        const res = await fetch(`${API}/roles/templates/${tid}/clone`, { headers: { Authorization: `Bearer ${accessToken}` } });
+                        const data = await res.json();
+                        setRoleReqForm(f => ({ ...f, permission_codes: data.data.permission_codes || [] }));
+                      } catch {}
+                    }
+                  }}>
+                    <option value="">— None —</option>
+                    {templates.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+                  </select>
+                </div>
+                <div className="ck-field">
+                  <label style={{ marginBottom: '0.5rem', display: 'block' }}>Permissions</label>
+                  {Object.entries(allPermissions.reduce((acc: any, p: any) => { if (!acc[p.module]) acc[p.module] = []; acc[p.module].push(p); return acc; }, {})).map(([mod, perms]: any) => (
+                    <div key={mod} style={{ marginBottom: '0.75rem' }}>
+                      <div style={{ fontWeight: 600, fontSize: '0.78rem', color: 'var(--primary)', textTransform: 'uppercase', marginBottom: '0.4rem' }}>{mod.replace(/_/g, ' ')}</div>
+                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.4rem' }}>
+                        {perms.map((p: any) => { const checked = roleReqForm.permission_codes.includes(p.code); return (<label key={p.id} style={{ display: 'flex', alignItems: 'center', gap: '0.3rem', cursor: 'pointer', background: checked ? 'rgba(99,102,241,0.1)' : 'var(--surface)', border: `1px solid ${checked ? 'var(--primary)' : 'var(--border)'}`, borderRadius: '6px', padding: '0.25rem 0.55rem', fontSize: '0.75rem', transition: 'all 0.15s' }}><input type="checkbox" checked={checked} onChange={e => setRoleReqForm(f => ({ ...f, permission_codes: e.target.checked ? [...f.permission_codes, p.code] : f.permission_codes.filter(c => c !== p.code) }))} style={{ accentColor: 'var(--primary)' }} />{p.action}</label>); })}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+                <div style={{ display: 'flex', gap: '0.75rem', justifyContent: 'flex-end' }}>
+                  <button className="ck-btn-cancel" onClick={() => setRolesSubTab('my-roles')}>Cancel</button>
+                  <button className="ck-btn-submit" disabled={roleReqSubmitting} onClick={async () => {
+                    setRoleReqError(''); setRoleReqSuccess('');
+                    if (!roleReqForm.role_name) { setRoleReqError('Role name required'); return; }
+                    setRoleReqSubmitting(true);
+                    try {
+                      await fetch(`${API}/roles/requests`, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${accessToken}` }, body: JSON.stringify(roleReqForm) });
+                      setRoleReqSuccess('✓ Request submitted!');
+                      setRoleReqForm({ role_name: '', description: '', role_type: 'RESTAURANT', template_role_id: '', permission_codes: [] });
+                      await loadRolesData();
+                      setTimeout(() => setRolesSubTab('requests'), 1500);
+                    } catch (err: any) { setRoleReqError(err.message || 'Failed'); }
+                    finally { setRoleReqSubmitting(false); }
+                  }}>{roleReqSubmitting ? 'Submitting…' : 'Submit Request'}</button>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }

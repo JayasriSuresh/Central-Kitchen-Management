@@ -4,6 +4,8 @@ interface AuthState {
   user: any | null;
   tenantId: string | null;
   accessToken: string | null;
+  activePortal: string | null;
+  workspaces?: any[];
 }
 
 interface AuthContextType extends AuthState {
@@ -16,7 +18,7 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [authState, setAuthState] = useState<AuthState>(() => {
     const stored = localStorage.getItem('auth_state');
-    return stored ? JSON.parse(stored) : { user: null, tenantId: null, accessToken: null };
+    return stored ? JSON.parse(stored) : { user: null, tenantId: null, accessToken: null, activePortal: null, workspaces: [] };
   });
 
   const setAuth = (data: Partial<AuthState>) => {
@@ -29,7 +31,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const logout = () => {
     localStorage.removeItem('auth_state');
-    setAuthState({ user: null, tenantId: null, accessToken: null });
+    setAuthState({ user: null, tenantId: null, accessToken: null, activePortal: null, workspaces: [] });
   };
 
   return (

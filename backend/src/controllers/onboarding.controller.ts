@@ -12,7 +12,11 @@ import {
 
 const TOKEN_TTL_DAYS = 7;
 
-const getTenantId = (req: Request): number => (req as any).tenantId;
+const getTenantId = (req: Request): number => {
+  const tenantId = (req as any).tenantId;
+  if (!tenantId) throw new Error('Central Kitchen tenant scope is required');
+  return tenantId;
+};
 
 // ─── POST /admin/restaurants/invite ──────────────────────────────────────────
 export const inviteRestaurant = async (req: Request, res: Response) => {

@@ -8,18 +8,38 @@ import RestaurantRegister from './pages/RestaurantRegister';
 import SystemAdminHome from './pages/SystemAdminHome';
 import './index.css';
 
-// Role-based guard: redirects after login based on role_type
+import ChooseWorkspace from './pages/ChooseWorkspace';
+import AdminLogin from './pages/AdminLogin';
+import './index.css';
+
+// Role-based guard: redirects after login based on role_type and activePortal
 function RoleRedirect() {
-  const { user } = useAuth();
+  const { user, activePortal } = useAuth();
   if (!user) return <Navigate to="/login" replace />;
-  if (user.role_type === 'system') return <Navigate to="/system" replace />;
-  if (user.role_type === 'restaurant') return <Navigate to="/restaurant" replace />;
+  
+  if (user.portals && user.portals.length > 1 && !activePortal) {
+    return <Navigate to="/choose-workspace" replace />;
+  }
+
+  const portal = activePortal || user.role_type;
+  if (portal === 'system') return <Navigate to="/system" replace />;
+  if (portal === 'restaurant') return <Navigate to="/restaurant" replace />;
   return <Navigate to="/central-kitchen" replace />;
 }
 
-function PrivateRoute({ children }: { children: React.ReactNode }) {
-  const { user } = useAuth();
+function PrivateRoute({ children, allowedPortal }: { children: React.ReactNode; allowedPortal?: string }) {
+  const { user, activePortal } = useAuth();
   if (!user) return <Navigate to="/login" replace />;
+
+  if (allowedPortal) {
+    const portal = activePortal || user.role_type;
+    if (portal !== allowedPortal) {
+      if (portal === 'system') return <Navigate to="/system" replace />;
+      if (portal === 'restaurant') return <Navigate to="/restaurant" replace />;
+      return <Navigate to="/central-kitchen" replace />;
+    }
+  }
+
   return <>{children}</>;
 }
 
@@ -29,6 +49,8 @@ function App() {
       <Router>
         <Routes>
           <Route path="/login" element={<Login />} />
+          <Route path="/admin/login" element={<AdminLogin />} />
+          <Route path="/choose-workspace" element={<PrivateRoute><ChooseWorkspace /></PrivateRoute>} />
           <Route path="/forgot-password" element={<ForgotPassword />} />
           <Route path="/onboarding/register" element={<RestaurantRegister />} />
 
@@ -37,13 +59,13 @@ function App() {
           <Route path="/" element={<RoleRedirect />} />
 
           {/* Master Admin / System pages */}
-          <Route path="/system" element={<PrivateRoute><SystemAdminHome /></PrivateRoute>} />
+          <Route path="/system" element={<PrivateRoute allowedPortal="system"><SystemAdminHome /></PrivateRoute>} />
 
           {/* Central Kitchen pages */}
-          <Route path="/central-kitchen" element={<PrivateRoute><CentralKitchenHome /></PrivateRoute>} />
+          <Route path="/central-kitchen" element={<PrivateRoute allowedPortal="central_kitchen"><CentralKitchenHome /></PrivateRoute>} />
 
           {/* Restaurant pages */}
-          <Route path="/restaurant" element={<PrivateRoute><RestaurantHome /></PrivateRoute>} />
+          <Route path="/restaurant" element={<PrivateRoute allowedPortal="restaurant"><RestaurantHome /></PrivateRoute>} />
         </Routes>
       </Router>
     </AuthProvider>

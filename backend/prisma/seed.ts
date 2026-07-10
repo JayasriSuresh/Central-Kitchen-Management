@@ -222,32 +222,38 @@ const ROLE_PERMISSIONS: Record<string, string[]> = {
 };
 
 const SYSTEM_ROLES = [
-  { name: 'MASTER_ADMIN', code: '00', type: 'system', is_super_admin: true },
-  { name: 'SUPER_ADMIN', code: '01', type: 'central_kitchen', is_super_admin: true },
-  { name: 'KITCHEN_MANAGER', code: '02', type: 'central_kitchen', is_super_admin: false },
-  { name: 'INVENTORY_MANAGER', code: '03', type: 'central_kitchen', is_super_admin: false },
-  { name: 'PURCHASE_MANAGER', code: '04', type: 'central_kitchen', is_super_admin: false },
-  { name: 'ACCOUNTS', code: '05', type: 'central_kitchen', is_super_admin: false },
-  { name: 'DELIVERY_STAFF', code: '06', type: 'central_kitchen', is_super_admin: false },
-  { name: 'RESTAURANT_ADMIN', code: '50', type: 'restaurant', is_super_admin: false },
-  { name: 'RESTAURANT_MANAGER', code: '51', type: 'restaurant', is_super_admin: false },
-  { name: 'RESTAURANT_STAFF', code: '52', type: 'restaurant', is_super_admin: false },
-  { name: 'BILLING_OPERATOR', code: '53', type: 'restaurant', is_super_admin: false },
-  { name: 'AUDITOR', code: '54', type: 'restaurant', is_super_admin: false },
+  // Master Admin role — platform level, no tenant
+  { name: 'MASTER_ADMIN',       code: '00', type: 'CENTRAL_KITCHEN', role_scope: 'GLOBAL', owner_type: 'MASTER', is_super_admin: true },
+  // CK global roles — seeded for every tenant
+  { name: 'SUPER_ADMIN',        code: '01', type: 'CENTRAL_KITCHEN', role_scope: 'GLOBAL', owner_type: 'MASTER', is_super_admin: true },
+  { name: 'KITCHEN_MANAGER',    code: '02', type: 'CENTRAL_KITCHEN', role_scope: 'GLOBAL', owner_type: 'MASTER', is_super_admin: false },
+  { name: 'INVENTORY_MANAGER',  code: '03', type: 'CENTRAL_KITCHEN', role_scope: 'GLOBAL', owner_type: 'MASTER', is_super_admin: false },
+  { name: 'PURCHASE_MANAGER',   code: '04', type: 'CENTRAL_KITCHEN', role_scope: 'GLOBAL', owner_type: 'MASTER', is_super_admin: false },
+  { name: 'ACCOUNTS',           code: '05', type: 'CENTRAL_KITCHEN', role_scope: 'GLOBAL', owner_type: 'MASTER', is_super_admin: false },
+  { name: 'DELIVERY_STAFF',     code: '06', type: 'CENTRAL_KITCHEN', role_scope: 'GLOBAL', owner_type: 'MASTER', is_super_admin: false },
+  // Restaurant global roles — seeded for every tenant
+  { name: 'RESTAURANT_ADMIN',   code: '50', type: 'RESTAURANT',       role_scope: 'GLOBAL', owner_type: 'MASTER', is_super_admin: false },
+  { name: 'RESTAURANT_MANAGER', code: '51', type: 'RESTAURANT',       role_scope: 'GLOBAL', owner_type: 'MASTER', is_super_admin: false },
+  { name: 'RESTAURANT_STAFF',   code: '52', type: 'RESTAURANT',       role_scope: 'GLOBAL', owner_type: 'MASTER', is_super_admin: false },
+  { name: 'BILLING_OPERATOR',   code: '53', type: 'RESTAURANT',       role_scope: 'GLOBAL', owner_type: 'MASTER', is_super_admin: false },
+  { name: 'AUDITOR',            code: '54', type: 'RESTAURANT',       role_scope: 'GLOBAL', owner_type: 'MASTER', is_super_admin: false },
 ];
 
 async function seedSystemRolesAndPermissions(prisma: PrismaClient) {
-  // 1. Permissions catalog
+  // 1. Permissions catalog (upsert with description)
   for (const perm of PERMISSIONS) {
     await prisma.permission.upsert({
       where: { code: perm.code },
       update: {},
-      create: perm,
+      create: {
+        ...perm,
+        description: `${perm.action.replace(/_/g, ' ')} ${perm.module.replace(/_/g, ' ')}`.toLowerCase(),
+      },
     });
   }
   console.log(`   ✓ Seeded ${PERMISSIONS.length} permissions`);
 
-  // 2. System roles (tenant_id: null)
+  // 2. Global system roles (tenant_id: null, role_scope: GLOBAL)
   for (const roleDef of SYSTEM_ROLES) {
     let role = await prisma.role.findFirst({
       where: { tenant_id: null, code: roleDef.code },
@@ -258,8 +264,10 @@ async function seedSystemRolesAndPermissions(prisma: PrismaClient) {
         data: {
           name: roleDef.name,
           type: roleDef.type,
-          is_system_role: true,
+          role_scope: roleDef.role_scope,
+          owner_type: roleDef.owner_type,
           is_super_admin: roleDef.is_super_admin,
+          status: 'active',
         },
       });
     } else {
@@ -269,8 +277,10 @@ async function seedSystemRolesAndPermissions(prisma: PrismaClient) {
           name: roleDef.name,
           code: roleDef.code,
           type: roleDef.type,
-          is_system_role: true,
+          role_scope: roleDef.role_scope,
+          owner_type: roleDef.owner_type,
           is_super_admin: roleDef.is_super_admin,
+          status: 'active',
         },
       });
     }
@@ -535,6 +545,112 @@ async function main() {
   } else {
     console.log(`   ℹ️  Restaurant user already exists (email: ${restEmail})`);
   }
+
+  // 5.5 Seed second Restaurant & John (Multi-workspace user)
+  console.log('\n5️⃣.5️⃣ Seeding second Restaurant and Multi-workspace User (John)...');
+  let rest2 = await prisma.restaurant.findFirst({ where: { name: 'North Indian Delights' } });
+  let rt2 = null;
+  if (!rest2) {
+    rest2 = await prisma.restaurant.create({
+      data: { name: 'North Indian Delights', address: '456 Northern St, Chennai', gst_number: '33BBBBB2222B2Z2', status: 'active' },
+    });
+
+    const maxRestNo = await prisma.restaurantTenant.aggregate({
+      where: { tenant_id: tenant.id },
+      _max: { restaurant_no: true },
+    });
+    const next_rest_no = (maxRestNo._max.restaurant_no ?? 0) + 1;
+
+    rt2 = await prisma.restaurantTenant.create({
+      data: {
+        tenant_id: tenant.id,
+        restaurant_id: rest2.id,
+        restaurant_no: next_rest_no,
+        branch_code: `BR-${String(next_rest_no).padStart(3, '0')}`,
+        contact_number: '9876543211',
+        status: 'active',
+      },
+    });
+    console.log(`   ✓ Created second restaurant (North Indian Delights) with rest_no: ${next_rest_no}`);
+  } else {
+    rt2 = await prisma.restaurantTenant.findFirst({
+      where: { tenant_id: tenant.id, restaurant_id: rest2.id },
+    });
+    console.log(`   ℹ️  Second restaurant already exists`);
+  }
+
+  const johnEmail = 'john@workspace.com';
+  const existingJohn = await prisma.user.findFirst({
+    where: { tenant_id: tenant.id, email: johnEmail },
+  });
+
+  if (!existingJohn) {
+    const kitchenMgrRole = await prisma.role.findFirst({
+      where: { tenant_id: tenant.id, code: '02' }, // KITCHEN_MANAGER
+    });
+    const restMgrRole = await prisma.role.findFirst({
+      where: { tenant_id: tenant.id, code: '51' }, // RESTAURANT_MANAGER
+    });
+
+    if (!kitchenMgrRole || !restMgrRole) {
+      throw new Error('Required roles (KITCHEN_MANAGER/RESTAURANT_MANAGER) not found for tenant');
+    }
+
+    const passwordHash = await bcrypt.hash('John@123', 12);
+    const user_id = '100000020002'; // CCC=100 RRR=000 RR=02 NNNN=0002
+
+    const john = await prisma.user.create({
+      data: {
+        tenant_id: tenant.id,
+        user_id,
+        username: 'john',
+        name: 'John',
+        email: johnEmail,
+        mobile: '9876543202',
+        password_hash: passwordHash,
+        primary_role_id: kitchenMgrRole.id,
+        email_verified: true,
+        status: 'active',
+      },
+    });
+
+    // Assignment 1: Central Kitchen (UserRole)
+    await prisma.userRole.create({
+      data: {
+        user_id: john.id,
+        role_id: kitchenMgrRole.id,
+      },
+    });
+
+    // Assignment 2: South Indian Delights Restaurant (RestaurantUserRole)
+    if (rt) {
+      await prisma.restaurantUserRole.create({
+        data: {
+          restaurant_tenant_id: rt.id,
+          user_id: john.id,
+          role_id: restMgrRole.id,
+        },
+      });
+    }
+
+    // Assignment 3: North Indian Delights Restaurant (RestaurantUserRole)
+    if (rt2) {
+      await prisma.restaurantUserRole.create({
+        data: {
+          restaurant_tenant_id: rt2.id,
+          user_id: john.id,
+          role_id: restMgrRole.id,
+        },
+      });
+    }
+
+    console.log(`   ✓ Created John (Multi-workspace user)`);
+    console.log(`      Email   : ${johnEmail}`);
+    console.log(`      Password: John@123`);
+  } else {
+    console.log(`   ℹ️  John already exists (email: ${johnEmail})`);
+  }
+
 
   // 6. Create the Master Admin User
   console.log('\n6️⃣  Seeding Master Admin user...');

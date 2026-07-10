@@ -18,11 +18,16 @@ export const comparePassword = async (password: string, hash: string) => bcrypt.
 export const generateTokens = async (
   userId: number,
   tenantId: number | null,
+  activeWorkspace?: {
+    type: 'central_kitchen' | 'restaurant';
+    restaurantId?: number | null;
+    roleId: number;
+  },
   userAgent?: string,
   ipAddress?: string,
   deviceName?: string,
 ) => {
-  const accessToken = jwt.sign({ userId, tenantId }, JWT_SECRET, { expiresIn: '15m' });
+  const accessToken = jwt.sign({ userId, tenantId, activeWorkspace }, JWT_SECRET, { expiresIn: '15m' });
   const refreshToken = crypto.randomBytes(64).toString('hex');
 
   const expiresAt = new Date();
@@ -47,6 +52,11 @@ export const generateTokens = async (
 
 export const rotateRefreshToken = async (
   incomingToken: string,
+  activeWorkspace?: {
+    type: 'central_kitchen' | 'restaurant';
+    restaurantId?: number | null;
+    roleId: number;
+  },
   userAgent?: string,
   ipAddress?: string,
 ) => {
@@ -69,7 +79,7 @@ export const rotateRefreshToken = async (
   });
 
   // Issue fresh pair
-  return generateTokens(record.user.id, record.user.tenant_id, userAgent, ipAddress);
+  return generateTokens(record.user.id, record.user.tenant_id, activeWorkspace, userAgent, ipAddress);
 };
 
 export const revokeRefreshToken = async (refreshToken: string) => {
@@ -134,24 +144,31 @@ export const clearFailedLogins = async (userId: number) => {
 // ─── Tenant seeding ────────────────────────────────────────────────────────
 
 export const seedTenantRoles = async (tx: Prisma.TransactionClient, tenantId: number) => {
-  const systemRoles = await tx.role.findMany({
+  // Copy all global system roles (tenant_id: null) into the new tenant
+  const globalRoles = await tx.role.findMany({
     where: { tenant_id: null },
     include: { role_permissions: true },
   });
 
-  if (systemRoles.length === 0) {
-    throw new Error('No system role templates found. Run the seed script first.');
+  if (globalRoles.length === 0) {
+    throw new Error('No global role templates found. Run the seed script first.');
   }
 
-  for (const sysRole of systemRoles) {
+  for (const sysRole of globalRoles) {
+    // Skip MASTER_ADMIN — it belongs to the platform only
+    if (sysRole.code === '00') continue;
+
     const newRole = await tx.role.create({
       data: {
         tenant_id: tenantId,
         name: sysRole.name,
         code: sysRole.code,
         type: sysRole.type,
-        is_system_role: sysRole.is_system_role,
+        role_scope: 'GLOBAL',      // copies of global roles remain scoped GLOBAL
+        owner_type: sysRole.owner_type,
+        description: sysRole.description,
         is_super_admin: sysRole.is_super_admin,
+        status: 'active',
       },
     });
 

@@ -43,6 +43,24 @@ export const authMiddleware = async (req: AuthRequest, res: Response, next: Next
       return res.status(403).json({ message: 'Forbidden: User is inactive' });
     }
 
+    // Override active workspace context dynamically
+    if (decoded.activeWorkspace) {
+      const activeRole = await prisma.role.findUnique({
+        where: { id: decoded.activeWorkspace.roleId },
+        include: {
+          role_permissions: {
+            include: { permission: true },
+          },
+        },
+      });
+      if (activeRole) {
+        user.primaryRole = activeRole as any;
+        user.primary_role_id = activeRole.id;
+      }
+      user.restaurant_id = decoded.activeWorkspace.restaurantId ?? null;
+      (user as any).role_type = decoded.activeWorkspace.type;
+    }
+
     req.user = user;
     req.tenantId = user.tenant_id ?? undefined;
     next();

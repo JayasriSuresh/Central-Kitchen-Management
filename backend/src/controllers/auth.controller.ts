@@ -1,5 +1,6 @@
 import { Request, Response } from 'express';
 import crypto from 'crypto';
+import jwt from 'jsonwebtoken';
 import prisma from '../utils/prisma';
 import {
   generateTokens,
@@ -84,7 +85,19 @@ export const login = async (req: Request, res: Response) => {
         ],
         deleted_at: null,
       },
-      include: { primaryRole: { select: { type: true } } },
+      include: {
+        primaryRole: { select: { type: true } },
+        user_roles: {
+          include: {
+            role: true
+          }
+        },
+        restaurant_user_roles: {
+          include: {
+            role: true
+          }
+        }
+      },
     });
 
     if (!user) {
@@ -136,9 +149,50 @@ export const login = async (req: Request, res: Response) => {
       }),
     ]);
 
+    const portals: string[] = [];
+    if (user.primaryRole?.type === 'system') {
+      portals.push('system');
+    } else {
+      const hasCk = user.primaryRole?.type === 'central_kitchen' || user.user_roles.some((ur: any) => ur.role.type === 'central_kitchen');
+      const hasRest = user.primaryRole?.type === 'restaurant' || user.restaurant_user_roles.some((rur: any) => rur.role.type === 'restaurant');
+      if (hasCk) portals.push('central_kitchen');
+      if (hasRest) portals.push('restaurant');
+    }
+
+    // Get all available workspaces for the user
+    const workspaces = await getWorkspaces(user.id, user.primaryRole, tenant_id);
+
+    // If multi-workspace, return a short-lived workspace selection token
+    if (workspaces.length > 1) {
+      const workspaceToken = jwt.sign(
+        { userId: user.id, tenantId: user.tenant_id, type: 'workspace_select' },
+        process.env.JWT_SECRET || 'secret',
+        { expiresIn: '5m' }
+      );
+      return res.status(200).json({
+        requireWorkspaceSelect: true,
+        workspaceToken,
+        workspaces,
+        user: {
+          id: user.id,
+          name: user.name,
+          email: user.email,
+        }
+      });
+    }
+
+    // Otherwise, log in directly using the single workspace
+    const singleWs = workspaces[0] || { type: user.primaryRole?.type ?? 'central_kitchen', roleId: user.primary_role_id, restaurantId: user.restaurant_id };
+    const activeWorkspace = {
+      type: singleWs.type,
+      restaurantId: singleWs.restaurantId || null,
+      roleId: singleWs.roleId,
+    };
+
     const tokens = await generateTokens(
       user.id,
       tenant_id,
+      activeWorkspace,
       req.headers['user-agent'],
       req.ip,
       'Web Browser',
@@ -151,15 +205,270 @@ export const login = async (req: Request, res: Response) => {
         username: user.username,
         name: user.name,
         email: user.email,
-        primary_role_id: user.primary_role_id,
-        role_type: user.primaryRole?.type ?? 'central_kitchen',
+        primary_role_id: activeWorkspace.roleId,
+        role_type: singleWs.type,
         tenant_id: user.tenant_id,
-        restaurant_id: user.restaurant_id,
+        restaurant_id: activeWorkspace.restaurantId,
+        portals,
       },
+      workspaces,
       ...tokens,
     });
   } catch (error: any) {
     return res.status(400).json({ message: error.message });
+  }
+};
+
+// ── Helpers & Workspace Selection Endpoints ──────────────────────────
+
+const getWorkspaces = async (userId: number, primaryRole: any, tenantId: number | null) => {
+  const workspaces: any[] = [];
+
+  // 1. Central Kitchen workspace (if they have a central_kitchen role)
+  const ckRoles = await prisma.userRole.findMany({
+    where: { user_id: userId, role: { type: 'central_kitchen' } },
+    include: { role: true }
+  });
+
+  if (ckRoles.length > 0) {
+    for (const ur of ckRoles) {
+      workspaces.push({
+        type: 'central_kitchen',
+        roleId: ur.role.id,
+        roleName: ur.role.name,
+        roleCode: ur.role.code,
+      });
+    }
+  } else if (primaryRole?.type === 'central_kitchen') {
+    workspaces.push({
+      type: 'central_kitchen',
+      roleId: primaryRole.id,
+      roleName: primaryRole.name,
+      roleCode: primaryRole.code,
+    });
+  }
+
+  // 2. Restaurant workspaces (if they have restaurant_user_roles)
+  const restRoles = await prisma.restaurantUserRole.findMany({
+    where: { user_id: userId },
+    include: {
+      role: true,
+      restaurantTenant: {
+        include: { restaurant: true }
+      }
+    }
+  });
+
+  for (const rur of restRoles) {
+    workspaces.push({
+      type: 'restaurant',
+      restaurantId: rur.restaurantTenant.restaurant.id,
+      restaurantName: rur.restaurantTenant.restaurant.name,
+      roleId: rur.role.id,
+      roleName: rur.role.name,
+      roleCode: rur.role.code,
+    });
+  }
+
+  return workspaces;
+};
+
+export const selectWorkspace = async (req: Request, res: Response) => {
+  try {
+    const { workspaceToken, type, restaurantId } = req.body;
+    if (!workspaceToken || !type) {
+      return res.status(400).json({ message: 'Missing workspaceToken or type' });
+    }
+
+    const decoded = jwt.verify(workspaceToken, process.env.JWT_SECRET || 'secret') as any;
+    if (!decoded || decoded.type !== 'workspace_select') {
+      return res.status(400).json({ message: 'Invalid or expired workspace selection token' });
+    }
+
+    const user = await prisma.user.findUnique({
+      where: { id: decoded.userId, deleted_at: null },
+      include: {
+        primaryRole: true,
+        user_roles: { include: { role: true } },
+        restaurant_user_roles: { include: { role: true, restaurantTenant: true } }
+      }
+    });
+
+    if (!user || user.status !== 'active') {
+      return res.status(401).json({ message: 'User not found or inactive' });
+    }
+
+    let roleId: number | null = null;
+
+    if (type === 'central_kitchen') {
+      const ur = user.user_roles.find(r => r.role.type === 'central_kitchen');
+      if (ur) {
+        roleId = ur.role.id;
+      } else if (user.primaryRole?.type === 'central_kitchen') {
+        roleId = user.primary_role_id;
+      }
+    } else if (type === 'restaurant') {
+      if (!restaurantId) {
+        return res.status(400).json({ message: 'restaurantId is required' });
+      }
+      const rur = user.restaurant_user_roles.find(
+        r => r.restaurantTenant.restaurant_id === Number(restaurantId)
+      );
+      if (rur) {
+        roleId = rur.role.id;
+      }
+    }
+
+    if (!roleId) {
+      return res.status(403).json({ message: 'Forbidden: You do not have access to this workspace' });
+    }
+
+    const activeWorkspace = {
+      type,
+      restaurantId: type === 'restaurant' ? Number(restaurantId) : null,
+      roleId,
+    };
+
+    const tokens = await generateTokens(
+      user.id,
+      user.tenant_id,
+      activeWorkspace,
+      req.headers['user-agent'],
+      req.ip,
+      'Web Browser'
+    );
+
+    const portals: string[] = [];
+    const hasCk = user.primaryRole?.type === 'central_kitchen' || user.user_roles.some((ur: any) => ur.role.type === 'central_kitchen');
+    const hasRest = user.primaryRole?.type === 'restaurant' || user.restaurant_user_roles.some((rur: any) => rur.role.type === 'restaurant');
+    if (hasCk) portals.push('central_kitchen');
+    if (hasRest) portals.push('restaurant');
+
+    const roleDetails = await prisma.role.findUnique({ where: { id: roleId } });
+
+    const workspaces = await getWorkspaces(user.id, user.primaryRole, user.tenant_id);
+
+    return res.status(200).json({
+      user: {
+        id: user.id,
+        user_id: user.user_id,
+        username: user.username,
+        name: user.name,
+        email: user.email,
+        primary_role_id: roleId,
+        role_type: roleDetails?.type ?? type,
+        tenant_id: user.tenant_id,
+        restaurant_id: activeWorkspace.restaurantId,
+        portals,
+      },
+      workspaces,
+      ...tokens,
+    });
+
+  } catch (error: any) {
+    console.error('selectWorkspace error:', error);
+    return res.status(400).json({ message: 'Invalid or expired token.' });
+  }
+};
+
+import { AuthRequest } from '../middlewares/auth.middleware';
+
+export const switchWorkspace = async (req: AuthRequest, res: Response) => {
+  try {
+    const user = req.user;
+    if (!user) {
+      return res.status(401).json({ message: 'Unauthorized' });
+    }
+
+    const { type, restaurantId } = req.body;
+
+    if (!type || (type !== 'central_kitchen' && type !== 'restaurant')) {
+      return res.status(400).json({ message: 'Invalid workspace type' });
+    }
+
+    let roleId: number | null = null;
+
+    if (type === 'central_kitchen') {
+      const ur = await prisma.userRole.findFirst({
+        where: {
+          user_id: user.id,
+          role: { type: 'central_kitchen' }
+        },
+        include: { role: true }
+      });
+      if (ur) {
+        roleId = ur.role.id;
+      } else if (user.primaryRole?.type === 'central_kitchen') {
+        roleId = user.primary_role_id;
+      }
+    } else if (type === 'restaurant') {
+      if (!restaurantId) {
+        return res.status(400).json({ message: 'restaurantId is required' });
+      }
+      
+      const rur = await prisma.restaurantUserRole.findFirst({
+        where: {
+          user_id: user.id,
+          restaurantTenant: { restaurant_id: Number(restaurantId) }
+        },
+        include: { role: true }
+      });
+      if (rur) {
+        roleId = rur.role.id;
+      }
+    }
+
+    if (!roleId) {
+      return res.status(403).json({ message: 'Access denied: You do not have access to this workspace' });
+    }
+
+    const activeWorkspace = {
+      type,
+      restaurantId: type === 'restaurant' ? Number(restaurantId) : null,
+      roleId
+    };
+
+    const tokens = await generateTokens(
+      user.id,
+      user.tenant_id,
+      activeWorkspace,
+      req.headers['user-agent'],
+      req.ip,
+      'Web Browser'
+    );
+
+    const portals: string[] = [];
+    const hasCk = user.primaryRole?.type === 'central_kitchen' || user.user_roles.some((ur: any) => ur.role.type === 'central_kitchen');
+    const hasRest = user.primaryRole?.type === 'restaurant' || user.restaurant_user_roles.some((rur: any) => rur.role.type === 'restaurant');
+    if (hasCk) portals.push('central_kitchen');
+    if (hasRest) portals.push('restaurant');
+
+    const roleDetails = await prisma.role.findUnique({
+      where: { id: roleId }
+    });
+
+    const workspaces = await getWorkspaces(user.id, user.primaryRole, user.tenant_id);
+
+    return res.status(200).json({
+      user: {
+        id: user.id,
+        user_id: user.user_id,
+        username: user.username,
+        name: user.name,
+        email: user.email,
+        primary_role_id: roleId,
+        role_type: roleDetails?.type ?? type,
+        tenant_id: user.tenant_id,
+        restaurant_id: type === 'restaurant' ? Number(restaurantId) : null,
+        portals,
+      },
+      workspaces,
+      ...tokens
+    });
+
+  } catch (error: any) {
+    console.error('switchWorkspace error:', error);
+    return res.status(500).json({ message: 'Internal Server Error' });
   }
 };
 
@@ -238,11 +547,12 @@ export const signup = async (req: Request, res: Response) => {
 
 export const refreshToken = async (req: Request, res: Response) => {
   try {
-    const { refresh_token } = req.body;
+    const { refresh_token, activeWorkspace } = req.body;
     if (!refresh_token) return res.status(400).json({ message: 'refresh_token is required' });
 
     const tokens = await rotateRefreshToken(
       refresh_token,
+      activeWorkspace,
       req.headers['user-agent'],
       req.ip,
     );
@@ -351,6 +661,19 @@ const findUserByIdentifier = (tenant_id: number | null, email_or_mobile: string)
       ],
       deleted_at: null,
     },
+    include: {
+      primaryRole: { select: { id: true, name: true, code: true, type: true } },
+      user_roles: {
+        include: {
+          role: true
+        }
+      },
+      restaurant_user_roles: {
+        include: {
+          role: true
+        }
+      }
+    }
   });
 
 // ─── POST /auth/send-otp ──────────────────────────────────────────────────────
@@ -583,9 +906,43 @@ export const loginOtpVerify = async (req: Request, res: Response) => {
       }),
     ]);
 
+    const portals: string[] = [];
+    const hasCk = user.primaryRole?.type === 'central_kitchen' || user.user_roles.some((ur: any) => ur.role.type === 'central_kitchen');
+    const hasRest = user.primaryRole?.type === 'restaurant' || user.restaurant_user_roles.some((rur: any) => rur.role.type === 'restaurant');
+    if (hasCk) portals.push('central_kitchen');
+    if (hasRest) portals.push('restaurant');
+
+    const workspaces = await getWorkspaces(user.id, user.primaryRole, tenant_id);
+
+    if (workspaces.length > 1) {
+      const workspaceToken = jwt.sign(
+        { userId: user.id, tenantId: user.tenant_id, type: 'workspace_select' },
+        process.env.JWT_SECRET || 'secret',
+        { expiresIn: '5m' }
+      );
+      return res.status(200).json({
+        requireWorkspaceSelect: true,
+        workspaceToken,
+        workspaces,
+        user: {
+          id: user.id,
+          name: user.name,
+          email: user.email,
+        }
+      });
+    }
+
+    const singleWs = workspaces[0] || { type: user.primaryRole?.type ?? 'central_kitchen', roleId: user.primary_role_id, restaurantId: user.restaurant_id };
+    const activeWorkspace = {
+      type: singleWs.type,
+      restaurantId: singleWs.restaurantId || null,
+      roleId: singleWs.roleId,
+    };
+
     const tokens = await generateTokens(
       user.id,
       tenant_id,
+      activeWorkspace,
       req.headers['user-agent'],
       req.ip,
       'Web Browser',
@@ -598,10 +955,11 @@ export const loginOtpVerify = async (req: Request, res: Response) => {
         username: user.username,
         name: user.name,
         email: user.email,
-        primary_role_id: user.primary_role_id,
-        role_type: (user as any).primaryRole?.type ?? 'central_kitchen',
+        primary_role_id: activeWorkspace.roleId,
+        role_type: singleWs.type,
         tenant_id: user.tenant_id,
-        restaurant_id: user.restaurant_id,
+        restaurant_id: activeWorkspace.restaurantId,
+        portals,
       },
       ...tokens,
     });

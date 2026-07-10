@@ -15,6 +15,8 @@ import {
   resetPasswordWithOtp,
   loginOtpSend,
   loginOtpVerify,
+  selectWorkspace,
+  switchWorkspace,
 } from '../controllers/auth.controller';
 import {
   getOnboardingDetailsByToken,
@@ -41,6 +43,7 @@ router.post('/reset-password', resetPasswordWithOtp);
 // OTP Login (passwordless login flow)
 router.post('/login-otp/send', loginOtpSend);
 router.post('/login-otp/verify', loginOtpVerify);
+router.post('/select-workspace', selectWorkspace);
 
 // Public onboarding routes (no auth required — accessed via email link)
 router.get('/onboarding/invite', getOnboardingDetailsByToken);
@@ -50,5 +53,6 @@ router.post('/onboarding/submit', submitOnboardingRegistration);
 router.post('/logout-all', authMiddleware, logoutAll);
 router.get('/sessions', authMiddleware, getSessions);
 router.delete('/sessions/:id', authMiddleware, revokeSession);
+router.post('/switch-workspace', authMiddleware, switchWorkspace);
 
 export default router;
