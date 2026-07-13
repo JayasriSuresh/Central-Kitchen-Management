@@ -287,7 +287,7 @@ export default function SystemAdminHome() {
           <button className="ck-burger" onClick={() => setSidebarOpen(o => !o)} aria-label="Toggle menu">
             <span /><span /><span />
           </button>
-          <div className="ck-topbar-brand">👑 System Administration</div>
+          <div className="ck-topbar-brand"><img src="/Qken_logo.svg" alt="Qken" className="ck-topbar-logo" /></div>
         </div>
         <div className="ck-topbar-right">
           <div className="ck-user-menu-wrap">

@@ -52,7 +52,7 @@ export default function SystemLogin() {
       <div className="login-card" style={{ maxWidth: '400px', borderRadius: '8px' }}>
         <div className="login-brand" style={{ marginBottom: '2rem' }}>
           <div className="login-logo" style={{ fontSize: '1.4rem', fontWeight: 700 }}>
-            👑 System Portal
+            <img src="/Qken_logo.svg" alt="Qken" className="login-logo-img" />
           </div>
           <p style={{ fontSize: '0.8rem', color: 'var(--text-light)', marginTop: '0.5rem' }}>
             Enterprise Administration

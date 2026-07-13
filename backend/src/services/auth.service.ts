@@ -250,19 +250,23 @@ export const generateUserId = async (
   const RR = role.code.padStart(2, '0');
 
   // 4. NNNN — atomic counter using UserCodeCounter table
-  //    Upsert increments last_sequence and returns the new value atomically.
-  //    Using raw SQL to ensure atomicity: UPDATE ... SET last_sequence = last_sequence + 1
-  await tx.$executeRaw`
-    INSERT INTO user_code_counters (tenant_id, restaurant_id, role_code, last_sequence)
-    VALUES (${tenantId}, ${restaurantId}, ${RR}, 1)
-    ON DUPLICATE KEY UPDATE last_sequence = last_sequence + 1
-  `;
-
-  const counter = await tx.userCodeCounter.findFirst({
-    where: { tenant_id: tenantId, restaurant_id: restaurantId, role_code: RR },
+  //    We use a sentinel value of 0 for restaurant_id when it's null (CK-level users),
+  //    because Prisma's typed upsert `where` clause does not accept null for compound
+  //    unique keys. MySQL's unique index also matches NULLs differently than non-NULL values.
+  const counterRestaurantId = restaurantId ?? 0;
+  const updatedCounter = await tx.userCodeCounter.upsert({
+    where: {
+      tenant_id_restaurant_id_role_code: {
+        tenant_id: tenantId,
+        restaurant_id: counterRestaurantId,
+        role_code: RR,
+      },
+    },
+    create: { tenant_id: tenantId, restaurant_id: counterRestaurantId, role_code: RR, last_sequence: 1 },
+    update: { last_sequence: { increment: 1 } },
     select: { last_sequence: true },
   });
-  const NNNN = String(counter?.last_sequence ?? 1).padStart(4, '0');
+  const NNNN = String(updatedCounter.last_sequence).padStart(4, '0');
 
   return `${CCC}${RRR}${RR}${NNNN}`;
 };

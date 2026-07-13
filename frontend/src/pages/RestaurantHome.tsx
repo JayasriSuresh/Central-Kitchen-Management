@@ -2,6 +2,8 @@ import { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
 import { useAuth } from '../context/AuthContext';
+import { usePermissions } from '../hooks/usePermissions';
+import { Can } from '../components/Can';
 
 const API = 'http://localhost:3000';
 
@@ -47,7 +49,8 @@ interface Order {
 type Tab = 'new-order' | 'history' | 'roles';
 
 export default function RestaurantHome() {
-  const { user, accessToken, logout, activePortal, workspaces, setAuth, hasPermission } = useAuth();
+  const { user, accessToken, logout, activePortal, workspaces, setAuth } = useAuth();
+  const { hasPermission, canView, canCreate, canUpdate, canDelete, canApprove } = usePermissions();
   const navigate = useNavigate();
 
   const [tab, setTab] = useState<Tab>('new-order');
@@ -258,7 +261,7 @@ export default function RestaurantHome() {
       {/* Navbar */}
       <header className="ck-topbar">
         <div className="ck-topbar-left">
-          <div className="ck-topbar-brand">🍽 Restaurant Order Portal</div>
+          <div className="ck-topbar-brand"><img src="/Qken_logo.svg" alt="Qken" className="ck-topbar-logo" /></div>
         </div>
         <div className="ck-topbar-right">
           <div className="ck-user-menu-wrap">
@@ -559,7 +562,7 @@ export default function RestaurantHome() {
               <h2 className="ck-section-title">🔐 Role Management</h2>
               <p className="ck-section-subtitle">View your restaurant roles and request custom roles</p>
             </div>
-            {rolesSubTab !== 'new-request' && (
+            {rolesSubTab !== 'new-request' && canCreate('login_user_mgmt') && (
               <button className="ck-btn-add" onClick={() => { setRolesSubTab('new-request'); loadRolesData(); }}>+ Request New Role</button>
             )}
           </div>

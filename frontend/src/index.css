@@ -64,6 +64,7 @@ body {
 .login-logo {
   display: inline-flex;
   align-items: center;
+  justify-content: center;
   gap: 0.5rem;
   font-size: 1.625rem;
   font-weight: 700;
@@ -74,6 +75,24 @@ body {
 .login-logo-icon {
   font-size: 1.75rem;
   line-height: 1;
+}
+
+/* Qken SVG logo image — login cards */
+.login-logo-img {
+  height: 48px;
+  width: auto;
+  max-width: 180px;
+  object-fit: contain;
+  display: block;
+}
+
+/* Qken SVG logo image — topbar */
+.ck-topbar-logo {
+  height: 32px;
+  width: auto;
+  max-width: 140px;
+  object-fit: contain;
+  display: block;
 }
 
 /* ── Fields ── */
@@ -316,6 +335,8 @@ body {
 }
 
 .ck-topbar-brand {
+  display: flex;
+  align-items: center;
   font-size: 0.9375rem;
   font-weight: 700;
   color: var(--text);

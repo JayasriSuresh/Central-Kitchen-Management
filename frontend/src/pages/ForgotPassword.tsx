@@ -85,8 +85,7 @@ export default function ForgotPassword() {
       <div className="login-card">
         <div className="login-brand">
           <div className="login-logo">
-            <span className="login-logo-icon">🍽</span>
-            Central Kitchen
+            <img src="/Qken_logo.svg" alt="Qken" className="login-logo-img" />
           </div>
         </div>
 
@@ -220,7 +219,7 @@ export default function ForgotPassword() {
         Remember your password? <Link to="/login" style={{ color: 'var(--blue)', fontWeight: 600, textDecoration: 'none' }}>Log in</Link>
       </div>
 
-      <div className="login-tagline">© 2026 Central Kitchen</div>
+      <div className="login-tagline">© 2026 Qken</div>
     </div>
   );
 }

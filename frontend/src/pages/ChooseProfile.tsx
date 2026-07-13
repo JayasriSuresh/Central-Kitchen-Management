@@ -26,7 +26,7 @@ export default function ChooseProfile() {
       <div className="login-card" style={{ maxWidth: '500px', width: '100%', borderRadius: '8px', padding: '2.5rem' }}>
         <div className="login-brand" style={{ marginBottom: '2.5rem' }}>
           <div className="login-logo" style={{ fontSize: '1.5rem', fontWeight: 700 }}>
-            🍽 Central Kitchen ERP
+            <img src="/Qken_logo.svg" alt="Qken" className="login-logo-img" />
           </div>
           <p style={{ fontSize: '0.875rem', color: 'var(--text-light)', marginTop: '0.5rem' }}>
             Select a portal to continue
@@ -80,7 +80,7 @@ export default function ChooseProfile() {
             >
               <span style={{ fontSize: '2rem' }}>🏭</span>
               <div>
-                <strong style={{ fontSize: '1rem', color: 'var(--text)' }}>Central Kitchen ERP</strong>
+                <strong style={{ fontSize: '1rem', color: 'var(--text)' }}>Qken ERP</strong>
                 <div style={{ fontSize: '0.8rem', color: 'var(--text-light)', marginTop: '0.25rem' }}>
                   Manage inventory, production plans, and restaurant orders
                 </div>

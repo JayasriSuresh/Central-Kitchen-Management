@@ -2,6 +2,9 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
 import { useAuth } from '../context/AuthContext';
+import { usePermissions } from '../hooks/usePermissions';
+import { centralKitchenNavigation } from '../config/navigation';
+import { Can } from '../components/Can';
 
 const API = 'http://localhost:3000';
 
@@ -152,12 +155,24 @@ interface PurchaseOrder {
 interface VendorItem { id: number; name: string; contact_number?: string; }
 
 export default function CentralKitchenHome() {
-  const { user, accessToken, logout, hasPermission, workspaces, activePortal, setAuth } = useAuth();
+  const { user, accessToken, logout, workspaces, activePortal, setAuth } = useAuth();
+  const { hasPermission, canView, canCreate, canUpdate, canDelete, canApprove } = usePermissions();
   const navigate = useNavigate();
   const [section, setSection] = useState<Section>('dashboard');
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>({ production: true, inventory: true, purchasing: false, administration: false });
   const [showUserMenu, setShowUserMenu] = useState(false);
+
+  const sectionModuleMap: Record<string, string> = {
+    restaurants: 'restaurant_outlet',
+    users: 'login_user_mgmt',
+    products: 'product_food_item',
+    'raw-materials': 'stock_inventory',
+    inventory: 'stock_inventory',
+    purchase: 'vendor_purchase_mgmt',
+    roles: 'login_user_mgmt'
+  };
+  const currentModule = sectionModuleMap[section] || '';
 
   const allowedSections = {
     dashboard: hasPermission('CK_ORDER_DASHBOARD_VIEW'),
@@ -286,6 +301,9 @@ export default function CentralKitchenHome() {
   const [formSuccess, setFormSuccess] = useState('');
   const [loading, setLoading] = useState(false);
   const [deleteConfirm, setDeleteConfirm] = useState<number | null>(null);
+
+  // Must be computed AFTER editId is declared above
+  const isReadOnly = editId ? !canUpdate(currentModule) : !canCreate(currentModule);
 
   const [rForm, setRForm] = useState(emptyRestaurant());
   const [uForm, setUForm] = useState(emptyUser());
@@ -458,28 +476,56 @@ export default function CentralKitchenHome() {
 
   const fetchAll = useCallback(async () => {
     try {
-      const [dd, rRes, uRes, pRes, sRes, oRes] = await Promise.all([
-        axios.get(`${API}/admin/dropdown-data`, { headers: authHeader }),
-        axios.get(`${API}/admin/restaurants`, { headers: authHeader }),
-        axios.get(`${API}/admin/users/ck`, { headers: authHeader }),
-        axios.get(`${API}/admin/products`, { headers: authHeader }),
-        axios.get(`${API}/admin/orders/summary`, { headers: authHeader }),
-        axios.get(`${API}/admin/restaurants/onboarding`, { headers: authHeader }),
-      ]);
-      setRoles(dd.data.roles);
-      setCategories(dd.data.categories);
-      setUnits(dd.data.units);
-      setRawMaterials(dd.data.rawMaterials);
-      setRestaurants(rRes.data.restaurants);
-      setCkUsers(uRes.data.users);
-      setProducts(pRes.data.products);
-      setOrdersSummary(sRes.data.summary);
-      setOnboardings(oRes.data.onboardings);
+      const promises: Promise<any>[] = [];
+      const keys: string[] = [];
+
+      promises.push(axios.get(`${API}/admin/dropdown-data`, { headers: authHeader }));
+      keys.push('dropdown');
+
+      if (hasPermission('RESTAURANT_OUTLET_VIEW')) {
+        promises.push(axios.get(`${API}/admin/restaurants`, { headers: authHeader }));
+        keys.push('restaurants');
+        promises.push(axios.get(`${API}/admin/restaurants/onboarding`, { headers: authHeader }));
+        keys.push('onboarding');
+      }
+      if (hasPermission('LOGIN_USER_MGMT_VIEW')) {
+        promises.push(axios.get(`${API}/admin/users/ck`, { headers: authHeader }));
+        keys.push('users');
+      }
+      if (hasPermission('PRODUCT_FOOD_ITEM_VIEW')) {
+        promises.push(axios.get(`${API}/admin/products`, { headers: authHeader }));
+        keys.push('products');
+      }
+      if (hasPermission('CK_ORDER_DASHBOARD_VIEW')) {
+        promises.push(axios.get(`${API}/admin/orders/summary`, { headers: authHeader }));
+        keys.push('ordersSummary');
+      }
+
+      const results = await Promise.all(promises);
+      results.forEach((res, index) => {
+        const key = keys[index];
+        if (key === 'dropdown') {
+          setRoles(res.data.roles);
+          setCategories(res.data.categories);
+          setUnits(res.data.units);
+          setRawMaterials(res.data.rawMaterials);
+        } else if (key === 'restaurants') {
+          setRestaurants(res.data.restaurants);
+        } else if (key === 'onboarding') {
+          setOnboardings(res.data.onboardings);
+        } else if (key === 'users') {
+          setCkUsers(res.data.users);
+        } else if (key === 'products') {
+          setProducts(res.data.products);
+        } else if (key === 'ordersSummary') {
+          setOrdersSummary(res.data.summary);
+        }
+      });
     } catch (err: any) {
       if (err.response?.status === 401) { logout(); navigate('/login'); }
       console.error('Failed to load data', err);
     }
-  }, [accessToken]);
+  }, [accessToken, hasPermission]);
 
   useEffect(() => { fetchAll(); }, [fetchAll]);
   useEffect(() => { if (section === 'inventory') fetchInventoryDashboard(); }, [section, fetchInventoryDashboard]);
@@ -688,9 +734,28 @@ export default function CentralKitchenHome() {
   };
   const removeRecipeRow = (i: number) => { if (recipe.length > 1) setRecipe(recipe.filter((_, idx) => idx !== i)); };
 
-  const ckRoles = roles.filter(r => r.type === 'central_kitchen');
+  const ckRoles = roles.filter(r => r.type?.toUpperCase() === 'CENTRAL_KITCHEN');
 
   const pendingCount = onboardings.filter(o => o.status === 'submitted' || o.status === 'submitted_again').length;
+
+  // Group the navigation items for dynamic sidebar rendering
+  const groupedItems = centralKitchenNavigation.reduce((acc, item) => {
+    if (!hasPermission(item.permission)) return acc;
+    if (item.group === 'None') {
+      acc.none.push(item);
+    } else {
+      acc.groups[item.group] = acc.groups[item.group] || [];
+      acc.groups[item.group].push(item);
+    }
+    return acc;
+  }, { none: [] as typeof centralKitchenNavigation, groups: {} as Record<string, typeof centralKitchenNavigation> });
+
+  const groupsConfig = [
+    { name: 'Operations', icon: '🏭', expandKey: 'production' },
+    { name: 'Inventory', icon: '📦', expandKey: 'inventory' },
+    { name: 'Purchasing', icon: '🛒', expandKey: 'purchasing' },
+    { name: 'Administration', icon: '⚙️', expandKey: 'administration' }
+  ] as const;
 
   return (
     <div className="ck-page">
@@ -701,7 +766,7 @@ export default function CentralKitchenHome() {
           <button className="ck-burger" onClick={() => setSidebarOpen(o => !o)} aria-label="Toggle menu">
             <span /><span /><span />
           </button>
-          <div className="ck-topbar-brand">🍽 Central Kitchen ERP</div>
+          <div className="ck-topbar-brand"><img src="/Qken_logo.svg" alt="Qken" className="ck-topbar-logo" /></div>
         </div>
         <div className="ck-topbar-right">
           <div className="ck-user-menu-wrap">
@@ -752,113 +817,87 @@ export default function CentralKitchenHome() {
         {/* ── SIDEBAR ── */}
         <aside className="ck-sidebar">
           <nav className="ck-nav">
-
-            {/* Dashboard */}
-            {allowedSections.dashboard && (
-              <button className={`ck-nav-item ${section === 'dashboard' ? 'ck-nav-item--active' : ''}`}
-                onClick={() => navigateTo('dashboard')}>
-                <span className="ck-nav-icon">📊</span>
-                <span className="ck-nav-label">Orders Dashboard</span>
+            {/* Render ungrouped navigation items */}
+            {groupedItems.none.map(item => (
+              <button
+                key={item.key}
+                className={`ck-nav-item ${section === item.key ? 'ck-nav-item--active' : ''}`}
+                onClick={() => navigateTo(item.key as any)}
+              >
+                <span className="ck-nav-icon">{item.icon}</span>
+                <span className="ck-nav-label">{item.title}</span>
               </button>
-            )}
+            ))}
 
-            {/* Production group */}
-            {allowedSections.production && (
-              <div className="ck-nav-group">
-                <button className="ck-nav-group-header" onClick={() => toggleGroup('production')}>
-                  <span className="ck-nav-icon">🏭</span>
-                  <span className="ck-nav-label">Production</span>
-                  <span className="ck-nav-caret">{expandedGroups.production ? '▾' : '▸'}</span>
-                </button>
-                {expandedGroups.production && (
-                  <div className="ck-nav-children">
-                    <button className={`ck-nav-child ${section === 'production' ? 'ck-nav-child--active' : ''}`}
-                      onClick={() => navigateTo('production')}>Planning</button>
-                    <button className="ck-nav-child ck-nav-child--soon">Queue <span className="ck-soon-tag">Soon</span></button>
-                    <button className="ck-nav-child ck-nav-child--soon">Batch History <span className="ck-soon-tag">Soon</span></button>
-                  </div>
-                )}
-              </div>
-            )}
+            {/* Render grouped navigation items */}
+            {groupsConfig.map(group => {
+              const items = groupedItems.groups[group.name] || [];
+              if (items.length === 0) return null; // Hide empty group category
 
-            {/* Inventory group */}
-            {allowedSections.inventory && (
-              <div className="ck-nav-group">
-                <button className="ck-nav-group-header" onClick={() => toggleGroup('inventory')}>
-                  <span className="ck-nav-icon">📦</span>
-                  <span className="ck-nav-label">Inventory</span>
-                  <span className="ck-nav-caret">{expandedGroups.inventory ? '▾' : '▸'}</span>
-                </button>
-                {expandedGroups.inventory && (
-                  <div className="ck-nav-children">
-                    <button className={`ck-nav-child ${section === 'raw-materials' ? 'ck-nav-child--active' : ''}`}
-                      onClick={() => navigateTo('raw-materials')}>Raw Materials</button>
-                    <button className={`ck-nav-child ${section === 'inventory' ? 'ck-nav-child--active' : ''}`}
-                      onClick={() => navigateTo('inventory')}>Stock Levels</button>
-                    <button className="ck-nav-child ck-nav-child--soon">Finished Goods <span className="ck-soon-tag">Soon</span></button>
-                  </div>
-                )}
-              </div>
-            )}
+              const isExpanded = expandedGroups[group.expandKey];
 
-            {/* Purchasing group */}
-            {allowedSections.purchase && (
-              <div className="ck-nav-group">
-                <button className="ck-nav-group-header" onClick={() => toggleGroup('purchasing')}>
-                  <span className="ck-nav-icon">🛒</span>
-                  <span className="ck-nav-label">Purchasing</span>
-                  <span className="ck-nav-caret">{expandedGroups.purchasing ? '▾' : '▸'}</span>
-                </button>
-                {expandedGroups.purchasing && (
-                  <div className="ck-nav-children">
-                    <button className={`ck-nav-child ${section === 'purchase' ? 'ck-nav-child--active' : ''}`}
-                      onClick={() => { navigateTo('purchase'); setPurchaseSubTab('requests'); }}>Material Requests</button>
-                    <button className={`ck-nav-child ${section === 'purchase' ? 'ck-nav-child--active' : ''}`}
-                      onClick={() => { navigateTo('purchase'); setPurchaseSubTab('orders'); }}>Purchase Orders</button>
-                    <button className={`ck-nav-child ${section === 'purchase' ? 'ck-nav-child--active' : ''}`}
-                      onClick={() => { navigateTo('purchase'); setPurchaseSubTab('vendors'); }}>Vendors</button>
-                  </div>
-                )}
-              </div>
-            )}
+              return (
+                <div key={group.name} className="ck-nav-group">
+                  <button className="ck-nav-group-header" onClick={() => toggleGroup(group.expandKey)}>
+                    <span className="ck-nav-icon">{group.icon}</span>
+                    <span className="ck-nav-label">{group.name}</span>
+                    <span className="ck-nav-caret">{isExpanded ? '▾' : '▸'}</span>
+                  </button>
+                  {isExpanded && (
+                    <div className="ck-nav-children">
+                      {items.map(item => {
+                        const isActive =
+                          section === item.key ||
+                          (item.key === 'purchase-requests' && section === 'purchase' && purchaseSubTab === 'requests') ||
+                          (item.key === 'purchase-orders' && section === 'purchase' && purchaseSubTab === 'orders') ||
+                          (item.key === 'vendors' && section === 'purchase' && purchaseSubTab === 'vendors');
 
-            {/* Administration group */}
-            {(allowedSections.restaurants || allowedSections.requests || allowedSections.users || allowedSections.products || allowedSections.roles) && (
-              <div className="ck-nav-group">
-                <button className="ck-nav-group-header" onClick={() => toggleGroup('administration')}>
-                  <span className="ck-nav-icon">⚙️</span>
-                  <span className="ck-nav-label">Administration</span>
-                  <span className="ck-nav-caret">{expandedGroups.administration ? '▾' : '▸'}</span>
-                </button>
-                {expandedGroups.administration && (
-                  <div className="ck-nav-children">
-                    {allowedSections.restaurants && (
-                      <button className={`ck-nav-child ${section === 'restaurants' ? 'ck-nav-child--active' : ''}`}
-                        onClick={() => navigateTo('restaurants')}>Restaurants</button>
-                    )}
-                    {allowedSections.requests && (
-                      <button className={`ck-nav-child ${section === 'requests' ? 'ck-nav-child--active' : ''}`}
-                        onClick={() => navigateTo('requests')}>
-                        Requests {pendingCount > 0 && <span className="ck-nav-badge">{pendingCount}</span>}
-                      </button>
-                    )}
-                    {allowedSections.users && (
-                      <button className={`ck-nav-child ${section === 'users' ? 'ck-nav-child--active' : ''}`}
-                        onClick={() => navigateTo('users')}>Users</button>
-                    )}
-                    {allowedSections.products && (
-                      <button className={`ck-nav-child ${section === 'products' ? 'ck-nav-child--active' : ''}`}
-                        onClick={() => navigateTo('products')}>Products</button>
-                    )}
-                    {allowedSections.roles && (
-                      <button className={`ck-nav-child ${section === 'roles' ? 'ck-nav-child--active' : ''}`}
-                        onClick={() => { navigateTo('roles'); loadRolesData(); }}>Roles</button>
-                    )}
-                  </div>
-                )}
-              </div>
-            )}
+                        const handleClick = () => {
+                          if (item.key === 'purchase-requests') {
+                            navigateTo('purchase');
+                            setPurchaseSubTab('requests');
+                          } else if (item.key === 'purchase-orders') {
+                            navigateTo('purchase');
+                            setPurchaseSubTab('orders');
+                          } else if (item.key === 'vendors') {
+                            navigateTo('purchase');
+                            setPurchaseSubTab('vendors');
+                          } else {
+                            navigateTo(item.key as any);
+                            if (item.key === 'roles') {
+                              loadRolesData();
+                            }
+                          }
+                        };
 
+                        return (
+                          <button
+                            key={item.key}
+                            className={`ck-nav-child ${isActive ? 'ck-nav-child--active' : ''}`}
+                            onClick={handleClick}
+                          >
+                            {item.title}
+                            {item.key === 'requests' && pendingCount > 0 && (
+                              <span className="ck-nav-badge">{pendingCount}</span>
+                            )}
+                          </button>
+                        );
+                      })}
+                      {/* Keep the "soon" placeholders if the user has permission for that group */}
+                      {group.name === 'Operations' && (
+                        <>
+                          <button className="ck-nav-child ck-nav-child--soon">Queue <span className="ck-soon-tag">Soon</span></button>
+                          <button className="ck-nav-child ck-nav-child--soon">Batch History <span className="ck-soon-tag">Soon</span></button>
+                        </>
+                      )}
+                      {group.name === 'Inventory' && (
+                        <button className="ck-nav-child ck-nav-child--soon">Finished Goods <span className="ck-soon-tag">Soon</span></button>
+                      )}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
           </nav>
         </aside>
 
@@ -919,12 +958,14 @@ export default function CentralKitchenHome() {
                               >
                                 {isExpanded ? 'Hide Details ▲' : 'View Details ▼'}
                               </button>
-                              <button
-                                className="ck-btn-plan"
-                                onClick={() => openPlanModal(item.product_id, item.product_name)}
-                              >
-                                🏭 Plan Production
-                              </button>
+                              {canCreate('production_planning') && (
+                                <button
+                                  className="ck-btn-plan"
+                                  onClick={() => openPlanModal(item.product_id, item.product_name)}
+                                >
+                                  🏭 Plan Production
+                                </button>
+                              )}
                             </div>
                           </div>
 
@@ -975,9 +1016,23 @@ export default function CentralKitchenHome() {
                 {section === 'restaurants' ? 'Restaurants' : section === 'users' ? 'CK Users' : 'Products'}
               </h2>
               {!showForm && (
-                <button id="btn-add" className="ck-btn-add" onClick={openAdd}>
-                  + Add {section === 'restaurants' ? 'Restaurant' : section === 'users' ? 'User' : 'Product'}
-                </button>
+                <>
+                  {section === 'restaurants' && canCreate('restaurant_outlet') && (
+                    <button id="btn-add" className="ck-btn-add" onClick={openAdd}>
+                      + Add Restaurant
+                    </button>
+                  )}
+                  {section === 'users' && canCreate('login_user_mgmt') && (
+                    <button id="btn-add" className="ck-btn-add" onClick={openAdd}>
+                      + Add User
+                    </button>
+                  )}
+                  {section === 'products' && canCreate('product_food_item') && (
+                    <button id="btn-add" className="ck-btn-add" onClick={openAdd}>
+                      + Add Product
+                    </button>
+                  )}
+                </>
               )}
             </div>
           )}
@@ -989,114 +1044,115 @@ export default function CentralKitchenHome() {
                 {section === 'restaurants' && !editId ? 'Invite Restaurant' : (editId ? 'Edit ' : 'Add ') + (section === 'restaurants' ? 'Restaurant' : section === 'users' ? 'User' : 'Product')}
               </div>
               <form onSubmit={handleSubmit} noValidate>
+                <fieldset disabled={isReadOnly} style={{ border: 'none', padding: 0, margin: 0, display: 'contents' }}>
+                  {/* Restaurant form */}
+                  {section === 'restaurants' && (
+                    editId ? (
+                      <div className="ck-form-grid">
+                        <div className="ck-field"><label>Restaurant Name *</label><input className="ck-input" required value={rForm.name} onChange={e => setRForm({ ...rForm, name: e.target.value })} placeholder="e.g. Biryani Hub" /></div>
+                        <div className="ck-field"><label>Contact Number</label><input className="ck-input" value={rForm.contact_number} onChange={e => setRForm({ ...rForm, contact_number: e.target.value })} placeholder="9876543210" /></div>
+                        <div className="ck-field ck-field--full"><label>Address</label><textarea className="ck-input ck-textarea" value={rForm.address} onChange={e => setRForm({ ...rForm, address: e.target.value })} placeholder="Full address" /></div>
+                        <div className="ck-field"><label>GST Number</label><input className="ck-input" value={rForm.gst_number} onChange={e => setRForm({ ...rForm, gst_number: e.target.value })} placeholder="27AAPFU0939F1ZV" /></div>
+                      </div>
+                    ) : (
+                      <div className="ck-form-grid">
+                        <div className="ck-field"><label>Restaurant Name *</label><input className="ck-input" required value={inviteForm.restaurant_name} onChange={e => setInviteForm({ ...inviteForm, restaurant_name: e.target.value })} placeholder="e.g. ABC Grill" /></div>
+                        <div className="ck-field"><label>Contact Person *</label><input className="ck-input" required value={inviteForm.contact_person} onChange={e => setInviteForm({ ...inviteForm, contact_person: e.target.value })} placeholder="John Doe" /></div>
+                        <div className="ck-field ck-field--full"><label>Email Address *</label><input type="email" className="ck-input" required value={inviteForm.email} onChange={e => setInviteForm({ ...inviteForm, email: e.target.value })} placeholder="manager@abcgrill.com" /></div>
+                        <div className="ck-field ck-field--full"><label>Notes (Optional)</label><textarea className="ck-input ck-textarea" value={inviteForm.notes} onChange={e => setInviteForm({ ...inviteForm, notes: e.target.value })} placeholder="Any onboarding notes..." /></div>
+                      </div>
+                    )
+                  )}
 
-                {/* Restaurant form */}
-                {section === 'restaurants' && (
-                  editId ? (
+                  {/* User form */}
+                  {section === 'users' && (
                     <div className="ck-form-grid">
-                      <div className="ck-field"><label>Restaurant Name *</label><input className="ck-input" required value={rForm.name} onChange={e => setRForm({ ...rForm, name: e.target.value })} placeholder="e.g. Biryani Hub" /></div>
-                      <div className="ck-field"><label>Contact Number</label><input className="ck-input" value={rForm.contact_number} onChange={e => setRForm({ ...rForm, contact_number: e.target.value })} placeholder="9876543210" /></div>
-                      <div className="ck-field ck-field--full"><label>Address</label><textarea className="ck-input ck-textarea" value={rForm.address} onChange={e => setRForm({ ...rForm, address: e.target.value })} placeholder="Full address" /></div>
-                      <div className="ck-field"><label>GST Number</label><input className="ck-input" value={rForm.gst_number} onChange={e => setRForm({ ...rForm, gst_number: e.target.value })} placeholder="27AAPFU0939F1ZV" /></div>
-                    </div>
-                  ) : (
-                    <div className="ck-form-grid">
-                      <div className="ck-field"><label>Restaurant Name *</label><input className="ck-input" required value={inviteForm.restaurant_name} onChange={e => setInviteForm({ ...inviteForm, restaurant_name: e.target.value })} placeholder="e.g. ABC Grill" /></div>
-                      <div className="ck-field"><label>Contact Person *</label><input className="ck-input" required value={inviteForm.contact_person} onChange={e => setInviteForm({ ...inviteForm, contact_person: e.target.value })} placeholder="John Doe" /></div>
-                      <div className="ck-field ck-field--full"><label>Email Address *</label><input type="email" className="ck-input" required value={inviteForm.email} onChange={e => setInviteForm({ ...inviteForm, email: e.target.value })} placeholder="manager@abcgrill.com" /></div>
-                      <div className="ck-field ck-field--full"><label>Notes (Optional)</label><textarea className="ck-input ck-textarea" value={inviteForm.notes} onChange={e => setInviteForm({ ...inviteForm, notes: e.target.value })} placeholder="Any onboarding notes..." /></div>
-                    </div>
-                  )
-                )}
-
-                {/* User form */}
-                {section === 'users' && (
-                  <div className="ck-form-grid">
-                    <div className="ck-field"><label>Full Name *</label><input className="ck-input" required value={uForm.name} onChange={e => setUForm({ ...uForm, name: e.target.value })} /></div>
-                    <div className="ck-field"><label>Email *</label><input type="email" className="ck-input" required value={uForm.email} onChange={e => setUForm({ ...uForm, email: e.target.value })} disabled={!!editId} /></div>
-                    <div className="ck-field"><label>Mobile *</label><input className="ck-input" required value={uForm.mobile} onChange={e => setUForm({ ...uForm, mobile: e.target.value })} /></div>
-                    <div className="ck-field"><label>Role *</label>
-                      <select className="ck-select" value={uForm.role_id} onChange={e => setUForm({ ...uForm, role_id: e.target.value })} required>
-                        <option value="">Select role</option>
-                        {ckRoles.map(r => <option key={r.id} value={r.id}>{r.name}</option>)}
-                      </select>
-                    </div>
-                    {!editId && <>
-                      <div className="ck-field"><label>Password *</label><input type="password" className="ck-input" required value={uForm.password} onChange={e => setUForm({ ...uForm, password: e.target.value })} /></div>
-                      <div className="ck-field"><label>Confirm Password *</label><input type="password" className="ck-input" required value={uForm.confirm_password} onChange={e => setUForm({ ...uForm, confirm_password: e.target.value })} /></div>
-                    </>}
-                  </div>
-                )}
-
-                {/* Product form */}
-                {section === 'products' && (
-                  <>
-                    <div className="ck-form-grid">
-                      <div className="ck-field"><label>Product Name *</label><input className="ck-input" required value={pForm.product_name} onChange={e => setPForm({ ...pForm, product_name: e.target.value })} /></div>
-                      <div className="ck-field"><label>Category</label>
-                        <select className="ck-select" value={pForm.category_id} onChange={e => setPForm({ ...pForm, category_id: e.target.value })}>
-                          <option value="">None</option>
-                          {categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                      <div className="ck-field"><label>Full Name *</label><input className="ck-input" required value={uForm.name} onChange={e => setUForm({ ...uForm, name: e.target.value })} /></div>
+                      <div className="ck-field"><label>Email *</label><input type="email" className="ck-input" required value={uForm.email} onChange={e => setUForm({ ...uForm, email: e.target.value })} disabled={!!editId} /></div>
+                      <div className="ck-field"><label>Mobile *</label><input className="ck-input" required value={uForm.mobile} onChange={e => setUForm({ ...uForm, mobile: e.target.value })} /></div>
+                      <div className="ck-field"><label>Role *</label>
+                        <select className="ck-select" value={uForm.role_id} onChange={e => setUForm({ ...uForm, role_id: e.target.value })} required>
+                          <option value="">Select role</option>
+                          {ckRoles.map(r => <option key={r.id} value={r.id}>{r.name}</option>)}
                         </select>
                       </div>
-                      <div className="ck-field ck-field--full"><label>Description</label><textarea className="ck-input ck-textarea" value={pForm.description} onChange={e => setPForm({ ...pForm, description: e.target.value })} /></div>
-                      <div className="ck-field"><label>Cost Price (£)</label><input type="number" min="0" step="0.01" className="ck-input" value={pForm.cost_price} onChange={e => setPForm({ ...pForm, cost_price: e.target.value })} /></div>
-                      <div className="ck-field"><label>Selling Price (£) *</label><input type="number" min="0" step="0.01" className="ck-input" required value={pForm.selling_price} onChange={e => setPForm({ ...pForm, selling_price: e.target.value })} /></div>
-                      <div className="ck-field"><label>Tax %</label><input type="number" min="0" max="100" step="0.01" className="ck-input" value={pForm.tax_percent} onChange={e => setPForm({ ...pForm, tax_percent: e.target.value })} /></div>
-                      <div className="ck-field"><label>Batch Size</label><input type="number" min="0" className="ck-input" value={pForm.batch_size} onChange={e => setPForm({ ...pForm, batch_size: e.target.value })} /></div>
-                      <div className="ck-field"><label>Min. Order Qty (MOQ)</label><input type="number" min="0" className="ck-input" value={pForm.moq} onChange={e => setPForm({ ...pForm, moq: e.target.value })} /></div>
-                      <div className="ck-field"><label>Unit</label>
-                        <select className="ck-select" value={pForm.unit_id} onChange={e => setPForm({ ...pForm, unit_id: e.target.value })}>
-                          <option value="">None</option>
-                          {units.map(u => <option key={u.id} value={u.id}>{u.name} ({u.symbol})</option>)}
-                        </select>
-                      </div>
-                      <div className="ck-field"><label>Shelf Life (days)</label><input type="number" min="0" className="ck-input" value={pForm.shelf_life_days} onChange={e => setPForm({ ...pForm, shelf_life_days: e.target.value })} /></div>
-                      <div className="ck-field"><label>Order Cutoff (hours before delivery)</label><input type="number" min="0" className="ck-input" value={pForm.order_cutoff_hours} onChange={e => setPForm({ ...pForm, order_cutoff_hours: e.target.value })} /></div>
-                      <div className="ck-field"><label>Lead Time (days)</label><input type="number" min="0" className="ck-input" value={pForm.lead_time_days} onChange={e => setPForm({ ...pForm, lead_time_days: e.target.value })} /></div>
-                      <div className="ck-field ck-field--check">
-                        <label className="ck-check-label">
-                          <input type="checkbox" checked={pForm.allow_urgent_order as boolean} onChange={e => setPForm({ ...pForm, allow_urgent_order: e.target.checked })} />
-                          Allow Urgent Orders
-                        </label>
-                      </div>
+                      {!editId && <>
+                        <div className="ck-field"><label>Password *</label><input type="password" className="ck-input" required value={uForm.password} onChange={e => setUForm({ ...uForm, password: e.target.value })} /></div>
+                        <div className="ck-field"><label>Confirm Password *</label><input type="password" className="ck-input" required value={uForm.confirm_password} onChange={e => setUForm({ ...uForm, confirm_password: e.target.value })} /></div>
+                      </>}
                     </div>
+                  )}
 
-                    {/* Recipe builder */}
-                    <div className="ck-recipe-section">
-                      <div className="ck-recipe-header">
-                        <span className="ck-recipe-title">Recipe Ingredients</span>
-                        <button type="button" className="ck-btn-plus" onClick={addRecipeRow}>＋ Add Ingredient</button>
-                      </div>
-                      <div className="ck-recipe-table">
-                        <div className="ck-recipe-row ck-recipe-row--head">
-                          <span>Raw Material *</span><span>Amount *</span><span>Unit</span><span></span>
+                  {/* Product form */}
+                  {section === 'products' && (
+                    <>
+                      <div className="ck-form-grid">
+                        <div className="ck-field"><label>Product Name *</label><input className="ck-input" required value={pForm.product_name} onChange={e => setPForm({ ...pForm, product_name: e.target.value })} /></div>
+                        <div className="ck-field"><label>Category</label>
+                          <select className="ck-select" value={pForm.category_id} onChange={e => setPForm({ ...pForm, category_id: e.target.value })}>
+                            <option value="">None</option>
+                            {categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                          </select>
                         </div>
-                        {recipe.map((row, i) => (
-                          <div key={i} className="ck-recipe-row">
-                            <select className="ck-select" value={row.raw_material_id} onChange={e => updateRecipeRow(i, 'raw_material_id', e.target.value)}>
-                              <option value="">Select...</option>
-                              {rawMaterials.map(rm => {
-                                const isSelectedElsewhere = recipe.some((r, idx) => idx !== i && String(r.raw_material_id) === String(rm.id));
-                                return (
-                                  <option key={rm.id} value={rm.id} disabled={isSelectedElsewhere}>
-                                    {rm.name} {isSelectedElsewhere ? '(Selected)' : ''}
-                                  </option>
-                                );
-                              })}
-                            </select>
-                            <input type="number" min="0" step="0.001" className="ck-input" placeholder="e.g. 1.5" value={row.quantity} onChange={e => updateRecipeRow(i, 'quantity', e.target.value)} />
-                            <select className="ck-select" value={row.unit_id} onChange={e => updateRecipeRow(i, 'unit_id', e.target.value)}>
-                              <option value="">Unit</option>
-                              {units.map(u => <option key={u.id} value={u.id}>{u.symbol}</option>)}
-                            </select>
-                            <button type="button" className="ck-btn-remove" onClick={() => removeRecipeRow(i)} disabled={recipe.length === 1}>✕</button>
-                          </div>
-                        ))}
+                        <div className="ck-field ck-field--full"><label>Description</label><textarea className="ck-input ck-textarea" value={pForm.description} onChange={e => setPForm({ ...pForm, description: e.target.value })} /></div>
+                        <div className="ck-field"><label>Cost Price (£)</label><input type="number" min="0" step="0.01" className="ck-input" value={pForm.cost_price} onChange={e => setPForm({ ...pForm, cost_price: e.target.value })} /></div>
+                        <div className="ck-field"><label>Selling Price (£) *</label><input type="number" min="0" step="0.01" className="ck-input" required value={pForm.selling_price} onChange={e => setPForm({ ...pForm, selling_price: e.target.value })} /></div>
+                        <div className="ck-field"><label>Tax %</label><input type="number" min="0" max="100" step="0.01" className="ck-input" value={pForm.tax_percent} onChange={e => setPForm({ ...pForm, tax_percent: e.target.value })} /></div>
+                        <div className="ck-field"><label>Batch Size</label><input type="number" min="0" className="ck-input" value={pForm.batch_size} onChange={e => setPForm({ ...pForm, batch_size: e.target.value })} /></div>
+                        <div className="ck-field"><label>Min. Order Qty (MOQ)</label><input type="number" min="0" className="ck-input" value={pForm.moq} onChange={e => setPForm({ ...pForm, moq: e.target.value })} /></div>
+                        <div className="ck-field"><label>Unit</label>
+                          <select className="ck-select" value={pForm.unit_id} onChange={e => setPForm({ ...pForm, unit_id: e.target.value })}>
+                            <option value="">None</option>
+                            {units.map(u => <option key={u.id} value={u.id}>{u.name} ({u.symbol})</option>)}
+                          </select>
+                        </div>
+                        <div className="ck-field"><label>Shelf Life (days)</label><input type="number" min="0" className="ck-input" value={pForm.shelf_life_days} onChange={e => setPForm({ ...pForm, shelf_life_days: e.target.value })} /></div>
+                        <div className="ck-field"><label>Order Cutoff (hours before delivery)</label><input type="number" min="0" className="ck-input" value={pForm.order_cutoff_hours} onChange={e => setPForm({ ...pForm, order_cutoff_hours: e.target.value })} /></div>
+                        <div className="ck-field"><label>Lead Time (days)</label><input type="number" min="0" className="ck-input" value={pForm.lead_time_days} onChange={e => setPForm({ ...pForm, lead_time_days: e.target.value })} /></div>
+                        <div className="ck-field ck-field--check">
+                          <label className="ck-check-label">
+                            <input type="checkbox" checked={pForm.allow_urgent_order as boolean} onChange={e => setPForm({ ...pForm, allow_urgent_order: e.target.checked })} />
+                            Allow Urgent Orders
+                          </label>
+                        </div>
                       </div>
-                    </div>
-                  </>
-                )}
+
+                      {/* Recipe builder */}
+                      <div className="ck-recipe-section">
+                        <div className="ck-recipe-header">
+                          <span className="ck-recipe-title">Recipe Ingredients</span>
+                          {!isReadOnly && <button type="button" className="ck-btn-plus" onClick={addRecipeRow}>＋ Add Ingredient</button>}
+                        </div>
+                        <div className="ck-recipe-table">
+                          <div className="ck-recipe-row ck-recipe-row--head">
+                            <span>Raw Material *</span><span>Amount *</span><span>Unit</span><span></span>
+                          </div>
+                          {recipe.map((row, i) => (
+                            <div key={i} className="ck-recipe-row">
+                              <select className="ck-select" value={row.raw_material_id} onChange={e => updateRecipeRow(i, 'raw_material_id', e.target.value)}>
+                                <option value="">Select...</option>
+                                {rawMaterials.map(rm => {
+                                  const isSelectedElsewhere = recipe.some((r, idx) => idx !== i && String(r.raw_material_id) === String(rm.id));
+                                  return (
+                                    <option key={rm.id} value={rm.id} disabled={isSelectedElsewhere}>
+                                      {rm.name} {isSelectedElsewhere ? '(Selected)' : ''}
+                                    </option>
+                                  );
+                                })}
+                              </select>
+                              <input type="number" min="0" step="0.001" className="ck-input" placeholder="e.g. 1.5" value={row.quantity} onChange={e => updateRecipeRow(i, 'quantity', e.target.value)} />
+                              <select className="ck-select" value={row.unit_id} onChange={e => updateRecipeRow(i, 'unit_id', e.target.value)}>
+                                <option value="">Unit</option>
+                                {units.map(u => <option key={u.id} value={u.id}>{u.symbol}</option>)}
+                              </select>
+                              {!isReadOnly && <button type="button" className="ck-btn-remove" onClick={() => removeRecipeRow(i)} disabled={recipe.length === 1}>✕</button>}
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    </>
+                  )}
+                </fieldset>
 
                 {formError && <div className="ck-form-error">{formError}</div>}
                 {formSuccess && <div className="ck-form-success">{formSuccess}</div>}
@@ -1129,14 +1185,20 @@ export default function CentralKitchenHome() {
                         {r.address && <span>📍 {r.address}</span>}
                       </div>
                     </div>
-                    <div className="ck-list-item-actions">
-                      <button className="ck-btn-edit" onClick={() => openEdit(r)}>Edit</button>
-                      {deleteConfirm === r.id
-                        ? <><span className="ck-confirm-text">Sure?</span>
-                          <button className="ck-btn-delete-confirm" onClick={() => handleDelete(r.id)}>Yes, Delete</button>
-                          <button className="ck-btn-cancel-sm" onClick={() => setDeleteConfirm(null)}>Cancel</button></>
-                        : <button className="ck-btn-delete" onClick={() => setDeleteConfirm(r.id)}>Delete</button>}
-                    </div>
+                    {(canUpdate('restaurant_outlet') || canDelete('restaurant_outlet')) && (
+                      <div className="ck-list-item-actions">
+                        {canUpdate('restaurant_outlet') && (
+                          <button className="ck-btn-edit" onClick={() => openEdit(r)}>Edit</button>
+                        )}
+                        {canDelete('restaurant_outlet') && (
+                          deleteConfirm === r.id
+                            ? <><span className="ck-confirm-text">Sure?</span>
+                              <button className="ck-btn-delete-confirm" onClick={() => handleDelete(r.id)}>Yes, Delete</button>
+                              <button className="ck-btn-cancel-sm" onClick={() => setDeleteConfirm(null)}>Cancel</button></>
+                            : <button className="ck-btn-delete" onClick={() => setDeleteConfirm(r.id)}>Delete</button>
+                        )}
+                      </div>
+                    )}
                   </div>
                 ))}
             </div>
@@ -1169,15 +1231,19 @@ export default function CentralKitchenHome() {
                       </div>
                       <div className="ck-list-item-actions">
                         {(ob.status === 'submitted') && (
-                          <button className="ck-btn-edit" onClick={async () => {
-                            try {
-                              const res = await axios.get(`${API}/admin/restaurants/onboarding/${ob.id}`, { headers: authHeader });
-                              setSelectedOnboardingDetail(res.data.onboarding);
-                              setShowReviewModal(true);
-                            } catch (err: any) {
-                              alert(err.response?.data?.message ?? 'Failed to load details');
-                            }
-                          }}>Review</button>
+                          canApprove('restaurant_outlet') ? (
+                            <button className="ck-btn-edit" onClick={async () => {
+                              try {
+                                const res = await axios.get(`${API}/admin/restaurants/onboarding/${ob.id}`, { headers: authHeader });
+                                setSelectedOnboardingDetail(res.data.onboarding);
+                                setShowReviewModal(true);
+                              } catch (err: any) {
+                                alert(err.response?.data?.message ?? 'Failed to load details');
+                              }
+                            }}>Review</button>
+                          ) : (
+                            <span style={{ fontSize: '0.8rem', color: 'var(--text-light)' }}>Submitted (Awaiting review)</span>
+                          )
                         )}
                         {(ob.status === 'invited' || ob.status === 'changes_requested') && (
                           <span style={{ fontSize: '0.8rem', color: 'var(--text-light)' }}>Awaiting response</span>
@@ -1320,14 +1386,20 @@ export default function CentralKitchenHome() {
                         <span className={`ck-status-badge ck-status-badge--${u.status}`}>{u.status}</span>
                       </div>
                     </div>
-                    <div className="ck-list-item-actions">
-                      <button className="ck-btn-edit" onClick={() => openEdit(u)}>Edit</button>
-                      {deleteConfirm === u.id
-                        ? <><span className="ck-confirm-text">Sure?</span>
-                          <button className="ck-btn-delete-confirm" onClick={() => handleDelete(u.id)}>Yes, Delete</button>
-                          <button className="ck-btn-cancel-sm" onClick={() => setDeleteConfirm(null)}>Cancel</button></>
-                        : <button className="ck-btn-delete" onClick={() => setDeleteConfirm(u.id)}>Delete</button>}
-                    </div>
+                    {(canUpdate('login_user_mgmt') || canDelete('login_user_mgmt')) && (
+                      <div className="ck-list-item-actions">
+                        {canUpdate('login_user_mgmt') && (
+                          <button className="ck-btn-edit" onClick={() => openEdit(u)}>Edit</button>
+                        )}
+                        {canDelete('login_user_mgmt') && (
+                          deleteConfirm === u.id
+                            ? <><span className="ck-confirm-text">Sure?</span>
+                              <button className="ck-btn-delete-confirm" onClick={() => handleDelete(u.id)}>Yes, Delete</button>
+                              <button className="ck-btn-cancel-sm" onClick={() => setDeleteConfirm(null)}>Cancel</button></>
+                            : <button className="ck-btn-delete" onClick={() => setDeleteConfirm(u.id)}>Delete</button>
+                        )}
+                      </div>
+                    )}
                   </div>
                 ))}
             </div>
@@ -1358,14 +1430,20 @@ export default function CentralKitchenHome() {
                         </div>
                       )}
                     </div>
-                    <div className="ck-list-item-actions">
-                      <button className="ck-btn-edit" onClick={() => openEdit(p)}>Edit</button>
-                      {deleteConfirm === p.id
-                        ? <><span className="ck-confirm-text">Sure?</span>
-                          <button className="ck-btn-delete-confirm" onClick={() => handleDelete(p.id)}>Yes, Delete</button>
-                          <button className="ck-btn-cancel-sm" onClick={() => setDeleteConfirm(null)}>Cancel</button></>
-                        : <button className="ck-btn-delete" onClick={() => setDeleteConfirm(p.id)}>Delete</button>}
-                    </div>
+                    {(canUpdate('product_food_item') || canDelete('product_food_item')) && (
+                      <div className="ck-list-item-actions">
+                        {canUpdate('product_food_item') && (
+                          <button className="ck-btn-edit" onClick={() => openEdit(p)}>Edit</button>
+                        )}
+                        {canDelete('product_food_item') && (
+                          deleteConfirm === p.id
+                            ? <><span className="ck-confirm-text">Sure?</span>
+                              <button className="ck-btn-delete-confirm" onClick={() => handleDelete(p.id)}>Yes, Delete</button>
+                              <button className="ck-btn-cancel-sm" onClick={() => setDeleteConfirm(null)}>Cancel</button></>
+                            : <button className="ck-btn-delete" onClick={() => setDeleteConfirm(p.id)}>Delete</button>
+                        )}
+                      </div>
+                    )}
                   </div>
                 ))}
             </div>
@@ -1379,53 +1457,62 @@ export default function CentralKitchenHome() {
 
               <div className="ck-section-header" style={{ marginBottom: '1.25rem' }}>
                 <h2 className="ck-section-title">🌾 Raw Materials Master</h2>
-                <button className="ck-btn-add" onClick={() => { setShowRmForm(true); setEditRmId(null); setRmForm(emptyRmForm()); setInvError(''); }}>+ Add Raw Material</button>
+                {canCreate('stock_inventory') && (
+                  <button className="ck-btn-add" onClick={() => { setShowRmForm(true); setEditRmId(null); setRmForm(emptyRmForm()); setInvError(''); }}>+ Add Raw Material</button>
+                )}
               </div>
 
-              {showRmForm && (
-                <div className="inv-modal-overlay" onClick={() => setShowRmForm(false)}>
-                  <div className="inv-modal" onClick={e => e.stopPropagation()}>
-                    <div className="inv-modal-header">
-                      <h3>{editRmId ? 'Edit Raw Material' : 'Add Raw Material'}</h3>
-                      <button className="inv-modal-close" onClick={() => setShowRmForm(false)}>✕</button>
-                    </div>
-                    <form onSubmit={handleRmSubmit} className="inv-form">
-                      <label>Name *<input className="ck-form-input" required value={rmForm.name} onChange={e => setRmForm(f => ({ ...f, name: e.target.value }))} /></label>
-                      <label>Category
-                        <select className="ck-form-select" value={rmForm.category} onChange={e => setRmForm(f => ({ ...f, category: e.target.value }))}>
-                          <option value="">— Select Category —</option>
-                          <option value="Produce">Produce</option>
-                          <option value="Dairy">Dairy</option>
-                          <option value="Meat & Poultry">Meat & Poultry</option>
-                          <option value="Seafood">Seafood</option>
-                          <option value="Dry Goods">Dry Goods</option>
-                          <option value="Spices">Spices</option>
-                          <option value="Oils & Condiments">Oils & Condiments</option>
-                          <option value="Bakery">Bakery</option>
-                          <option value="Beverages">Beverages</option>
-                          <option value="Packaging">Packaging</option>
-                          <option value="Other">Other</option>
-                        </select>
-                      </label>
-                      <label>Unit<select className="ck-form-select" value={rmForm.unit_id} onChange={e => setRmForm(f => ({ ...f, unit_id: e.target.value }))}>
-                        <option value="">— Select Unit —</option>
-                        {units.map(u => <option key={u.id} value={u.id}>{u.name} ({u.symbol})</option>)}
-                      </select></label>
-                      <label>Reorder Level<input className="ck-form-input" type="number" step="0.01" value={rmForm.reorder_level} onChange={e => setRmForm(f => ({ ...f, reorder_level: e.target.value }))} /></label>
-                      <label>Standard Purchase Price (£)<input className="ck-form-input" type="number" step="0.01" value={rmForm.standard_price} onChange={e => setRmForm(f => ({ ...f, standard_price: e.target.value }))} /></label>
-                      <label>Status<select className="ck-form-select" value={rmForm.status} onChange={e => setRmForm(f => ({ ...f, status: e.target.value }))}>
-                        <option value="active">Active</option>
-                        <option value="inactive">Inactive</option>
-                      </select></label>
-                      {invError && <div className="ck-form-error">{invError}</div>}
-                      <div className="inv-modal-actions">
-                        <button type="button" className="ck-btn-cancel-sm" onClick={() => setShowRmForm(false)}>Cancel</button>
-                        <button type="submit" className="ck-btn-add" disabled={loading}>{loading ? 'Saving…' : 'Save'}</button>
+              {showRmForm && (() => {
+                const isReadOnlyRm = editRmId ? !canUpdate('stock_inventory') : !canCreate('stock_inventory');
+                return (
+                  <div className="inv-modal-overlay" onClick={() => setShowRmForm(false)}>
+                    <div className="inv-modal" onClick={e => e.stopPropagation()}>
+                      <div className="inv-modal-header">
+                        <h3>{editRmId ? 'Edit Raw Material' : 'Add Raw Material'}</h3>
+                        <button className="inv-modal-close" onClick={() => setShowRmForm(false)}>✕</button>
                       </div>
-                    </form>
+                      <form onSubmit={handleRmSubmit} className="inv-form">
+                        <fieldset disabled={isReadOnlyRm} style={{ border: 'none', padding: 0, margin: 0, display: 'contents' }}>
+                          <label>Name *<input className="ck-form-input" required value={rmForm.name} onChange={e => setRmForm(f => ({ ...f, name: e.target.value }))} /></label>
+                          <label>Category
+                            <select className="ck-form-select" value={rmForm.category} onChange={e => setRmForm(f => ({ ...f, category: e.target.value }))}>
+                              <option value="">— Select Category —</option>
+                              <option value="Produce">Produce</option>
+                              <option value="Dairy">Dairy</option>
+                              <option value="Meat & Poultry">Meat & Poultry</option>
+                              <option value="Seafood">Seafood</option>
+                              <option value="Dry Goods">Dry Goods</option>
+                              <option value="Spices">Spices</option>
+                              <option value="Oils & Condiments">Oils & Condiments</option>
+                              <option value="Bakery">Bakery</option>
+                              <option value="Beverages">Beverages</option>
+                              <option value="Packaging">Packaging</option>
+                              <option value="Other">Other</option>
+                            </select>
+                          </label>
+                          <label>Unit<select className="ck-form-select" value={rmForm.unit_id} onChange={e => setRmForm(f => ({ ...f, unit_id: e.target.value }))}>
+                            <option value="">— Select Unit —</option>
+                            {units.map(u => <option key={u.id} value={u.id}>{u.name} ({u.symbol})</option>)}
+                          </select></label>
+                          <label>Reorder Level<input className="ck-form-input" type="number" step="0.01" value={rmForm.reorder_level} onChange={e => setRmForm(f => ({ ...f, reorder_level: e.target.value }))} /></label>
+                          <label>Standard Purchase Price (£)<input className="ck-form-input" type="number" step="0.01" value={rmForm.standard_price} onChange={e => setRmForm(f => ({ ...f, standard_price: e.target.value }))} /></label>
+                          <label>Status<select className="ck-form-select" value={rmForm.status} onChange={e => setRmForm(f => ({ ...f, status: e.target.value }))}>
+                            <option value="active">Active</option>
+                            <option value="inactive">Inactive</option>
+                          </select></label>
+                        </fieldset>
+                        {invError && <div className="ck-form-error">{invError}</div>}
+                        <div className="inv-modal-actions">
+                          <button type="button" className="ck-btn-cancel-sm" onClick={() => setShowRmForm(false)}>Cancel</button>
+                          {!isReadOnlyRm && (
+                            <button type="submit" className="ck-btn-add" disabled={loading}>{loading ? 'Saving…' : 'Save'}</button>
+                          )}
+                        </div>
+                      </form>
+                    </div>
                   </div>
-                </div>
-              )}
+                );
+              })()}
 
               <div className="inv-search-bar">
                 <input className="inv-search-input" placeholder="🔍 Search raw materials…" value={rmSearch} onChange={e => setRmSearch(e.target.value)} />
@@ -1447,14 +1534,20 @@ export default function CentralKitchenHome() {
                           {rm.standard_price != null && <span>Std. Price: <strong>£{Number(rm.standard_price).toFixed(2)}</strong></span>}
                         </div>
                       </div>
-                      <div className="ck-list-item-actions">
-                        <button className="ck-btn-edit" onClick={() => { setEditRmId(rm.id); setRmForm({ name: rm.name, category: rm.category || '', unit_id: String(rm.unit_id || ''), reorder_level: String(rm.reorder_level || ''), standard_price: String(rm.standard_price || ''), status: 'active' }); setShowRmForm(true); setInvError(''); }}>Edit</button>
-                        {deleteConfirm === rm.id
-                          ? <><span className="ck-confirm-text">Sure?</span>
-                            <button className="ck-btn-delete-confirm" onClick={() => handleDeleteRm(rm.id)}>Yes, Delete</button>
-                            <button className="ck-btn-cancel-sm" onClick={() => setDeleteConfirm(null)}>Cancel</button></>
-                          : <button className="ck-btn-delete" onClick={() => setDeleteConfirm(rm.id)}>Delete</button>}
-                      </div>
+                      {(canUpdate('stock_inventory') || canDelete('stock_inventory')) && (
+                        <div className="ck-list-item-actions">
+                          {canUpdate('stock_inventory') && (
+                            <button className="ck-btn-edit" onClick={() => { setEditRmId(rm.id); setRmForm({ name: rm.name, category: rm.category || '', unit_id: String(rm.unit_id || ''), reorder_level: String(rm.reorder_level || ''), standard_price: String(rm.standard_price || ''), status: 'active' }); setShowRmForm(true); setInvError(''); }}>Edit</button>
+                          )}
+                          {canDelete('stock_inventory') && (
+                            deleteConfirm === rm.id
+                              ? <><span className="ck-confirm-text">Sure?</span>
+                                <button className="ck-btn-delete-confirm" onClick={() => handleDeleteRm(rm.id)}>Yes, Delete</button>
+                                <button className="ck-btn-cancel-sm" onClick={() => setDeleteConfirm(null)}>Cancel</button></>
+                              : <button className="ck-btn-delete" onClick={() => setDeleteConfirm(rm.id)}>Delete</button>
+                          )}
+                        </div>
+                      )}
                     </div>
                   ))}
               </div>
@@ -1470,8 +1563,12 @@ export default function CentralKitchenHome() {
               <div className="ck-section-header" style={{ marginBottom: '1.25rem' }}>
                 <h2 className="ck-section-title">📦 Raw Materials Inventory</h2>
                 <div style={{ display: 'flex', gap: '0.5rem' }}>
-                  <button className="inv-btn-secondary" onClick={() => { setAdjForm(emptyAdjForm()); setInvError(''); setShowAdjModal(true); }}>⚖ Adjust Stock</button>
-                  <button className="ck-btn-add" onClick={() => { setBatchForm(emptyBatchForm()); setInvError(''); setShowBatchModal(true); }}>+ Update Inventory</button>
+                  {canUpdate('stock_inventory') && (
+                    <button className="inv-btn-secondary" onClick={() => { setAdjForm(emptyAdjForm()); setInvError(''); setShowAdjModal(true); }}>⚖ Adjust Stock</button>
+                  )}
+                  {canCreate('stock_inventory') && (
+                    <button className="ck-btn-add" onClick={() => { setBatchForm(emptyBatchForm()); setInvError(''); setShowBatchModal(true); }}>+ Update Inventory</button>
+                  )}
                 </div>
               </div>
 
@@ -1696,27 +1793,28 @@ export default function CentralKitchenHome() {
                     ))}
                   </div>
 
-                  {/* Actions */}
-                  <div className="plan-action-bar">
-                    {selectedPlan.status === 'draft' && (
-                      <button className="ck-btn-plan" disabled={planActionLoading}
-                        onClick={() => handlePlanAction(selectedPlan.id, 'material-request')}>
-                        {planActionLoading ? '...' : '📋 Generate Material Request'}
-                      </button>
-                    )}
-                    {selectedPlan.status === 'material_check_completed' && (
-                      <button className="ck-btn-plan" disabled={planActionLoading}
-                        onClick={() => handlePlanAction(selectedPlan.id, 'mark-ready')}>
-                        {planActionLoading ? '...' : '✅ Check & Mark Ready'}
-                      </button>
-                    )}
-                    {selectedPlan.status === 'ready_for_production' && (
-                      <button className="plan-start-btn" disabled={planActionLoading}
-                        onClick={() => handlePlanAction(selectedPlan.id, 'start')}>
-                        {planActionLoading ? '⟳ Starting...' : '▶ Start Production'}
-                      </button>
-                    )}
-                  </div>
+                  {canUpdate('production_planning') && (
+                    <div className="plan-action-bar">
+                      {selectedPlan.status === 'draft' && (
+                        <button className="ck-btn-plan" disabled={planActionLoading}
+                          onClick={() => handlePlanAction(selectedPlan.id, 'material-request')}>
+                          {planActionLoading ? '...' : '📋 Generate Material Request'}
+                        </button>
+                      )}
+                      {selectedPlan.status === 'material_check_completed' && (
+                        <button className="ck-btn-plan" disabled={planActionLoading}
+                          onClick={() => handlePlanAction(selectedPlan.id, 'mark-ready')}>
+                          {planActionLoading ? '...' : '✅ Check & Mark Ready'}
+                        </button>
+                      )}
+                      {selectedPlan.status === 'ready_for_production' && (
+                        <button className="plan-start-btn" disabled={planActionLoading}
+                          onClick={() => handlePlanAction(selectedPlan.id, 'start')}>
+                          {planActionLoading ? '⟳ Starting...' : '▶ Start Production'}
+                        </button>
+                      )}
+                    </div>
+                  )}
                   <div style={{ fontSize: '0.75rem', color: 'var(--text-light)', marginTop: '0.5rem' }}>
                     Created: {new Date(selectedPlan.created_at).toLocaleString('en-IN')} by {selectedPlan.createdBy?.name || '—'}
                   </div>
@@ -1798,14 +1896,12 @@ export default function CentralKitchenHome() {
                             </div>
                           )}
                         </div>
-                        <div className="ck-list-item-actions">
-                          {req.status === 'pending' && (
-                            <>
-                              <button className="ck-btn-plan" onClick={() => { setApproveModal(req); setApproveForm({ vendor_id: '', unit_price: '', modified_qty: String(Number(req.requirement.purchase_needed_qty).toFixed(2)), expected_delivery_date: '' }); }}>✓ Approve & Create PO</button>
-                              <button className="ck-btn-delete" onClick={async () => { await axios.post(`${API}/purchase/requests/${req.id}/reject`, {}, { headers: authHeader }); fetchPurchaseData(); }}>✗ Reject</button>
-                            </>
-                          )}
-                        </div>
+                        {canApprove('vendor_purchase_mgmt') && req.status === 'pending' && (
+                          <div className="ck-list-item-actions">
+                            <button className="ck-btn-plan" onClick={() => { setApproveModal(req); setApproveForm({ vendor_id: '', unit_price: '', modified_qty: String(Number(req.requirement.purchase_needed_qty).toFixed(2)), expected_delivery_date: '' }); }}>✓ Approve & Create PO</button>
+                            <button className="ck-btn-delete" onClick={async () => { await axios.post(`${API}/purchase/requests/${req.id}/reject`, {}, { headers: authHeader }); fetchPurchaseData(); }}>✗ Reject</button>
+                          </div>
+                        )}
                       </div>
                     ))
                   }
@@ -1840,7 +1936,7 @@ export default function CentralKitchenHome() {
                               ))}
                             </div>
                           </div>
-                          {po.status !== 'received' && (
+                          {canUpdate('vendor_purchase_mgmt') && po.status !== 'received' && (
                             <button className="ck-btn-plan" onClick={() => openGrnModal(po)}>📦 Receive Stock (GRN)</button>
                           )}
                         </div>
@@ -1853,9 +1949,11 @@ export default function CentralKitchenHome() {
               {/* Vendors */}
               {purchaseSubTab === 'vendors' && (
                 <div className="fade-in">
-                  <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '1rem' }}>
-                    <button className="ck-btn-add" onClick={() => { setVendorForm({ name: '', contact_number: '', gst_number: '', payment_terms: '', address: '' }); setShowVendorForm(true); }}>+ Add Vendor</button>
-                  </div>
+                  {canCreate('vendor_purchase_mgmt') && (
+                    <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '1rem' }}>
+                      <button className="ck-btn-add" onClick={() => { setVendorForm({ name: '', contact_number: '', gst_number: '', payment_terms: '', address: '' }); setShowVendorForm(true); }}>+ Add Vendor</button>
+                    </div>
+                  )}
                   <div className="ck-list">
                     {vendors.length === 0
                       ? <div className="ck-empty">No vendors yet. Add vendors to assign when approving purchase requests.</div>
@@ -1884,7 +1982,7 @@ export default function CentralKitchenHome() {
                   <h2 className="ck-section-title">🔐 Role Management</h2>
                   <p className="ck-section-subtitle">View assigned roles and request custom roles for your kitchen</p>
                 </div>
-                {rolesSubTab !== 'new-request' && (
+                {rolesSubTab !== 'new-request' && canCreate('login_user_mgmt') && (
                   <button className="ck-btn-add" onClick={() => { setRolesSubTab('new-request'); loadRolesData(); }}>
                     + Request New Role
                   </button>
@@ -2289,7 +2387,7 @@ export default function CentralKitchenHome() {
               </div>
               <div className="plan-modal-footer">
                 <button className="ck-btn-cancel-sm" onClick={() => setShowPlanModal(false)}>Close</button>
-                {planPreview && planPreview.has_recipe && !planSaveSuccess && (
+                {planPreview && planPreview.has_recipe && !planSaveSuccess && canCreate('production_planning') && (
                   <button className="ck-btn-add" onClick={saveDraftPlan} disabled={savingPlan}>
                     {savingPlan ? 'Saving…' : '💾 Save Draft Plan'}
                   </button>

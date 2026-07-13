@@ -217,8 +217,7 @@ export default function Login() {
         {/* Brand */}
         <div className="login-brand">
           <div className="login-logo">
-            <span className="login-logo-icon">🍽</span>
-            Central Kitchen
+            <img src="/Qken_logo.svg" alt="Qken" className="login-logo-img" />
           </div>
         </div>
 
@@ -365,7 +364,7 @@ export default function Login() {
         )}
       </div>
 
-      <div className="login-tagline">© 2026 Central Kitchen</div>
+      <div className="login-tagline">© 2026 Qken</div>
     </div>
   );
 }

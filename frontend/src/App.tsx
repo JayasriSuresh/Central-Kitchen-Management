@@ -6,10 +6,9 @@ import CentralKitchenHome from './pages/CentralKitchenHome';
 import RestaurantHome from './pages/RestaurantHome';
 import RestaurantRegister from './pages/RestaurantRegister';
 import SystemAdminHome from './pages/SystemAdminHome';
-import './index.css';
-
 import ChooseWorkspace from './pages/ChooseWorkspace';
 import AdminLogin from './pages/AdminLogin';
+import AccessDenied from './pages/AccessDenied';
 import './index.css';
 
 // Role-based guard: redirects after login based on role_type and activePortal
@@ -34,9 +33,7 @@ function PrivateRoute({ children, allowedPortal }: { children: React.ReactNode; 
   if (allowedPortal) {
     const portal = (activePortal || user.role_type)?.toLowerCase();
     if (portal !== allowedPortal?.toLowerCase()) {
-      if (portal === 'system') return <Navigate to="/system" replace />;
-      if (portal === 'restaurant') return <Navigate to="/restaurant" replace />;
-      return <Navigate to="/central-kitchen" replace />;
+      return <Navigate to="/access-denied" replace />;
     }
   }
 
@@ -53,6 +50,7 @@ function App() {
           <Route path="/choose-workspace" element={<PrivateRoute><ChooseWorkspace /></PrivateRoute>} />
           <Route path="/forgot-password" element={<ForgotPassword />} />
           <Route path="/onboarding/register" element={<RestaurantRegister />} />
+          <Route path="/access-denied" element={<AccessDenied />} />
 
           {/* Role-based redirect from /dashboard and / */}
           <Route path="/dashboard" element={<RoleRedirect />} />

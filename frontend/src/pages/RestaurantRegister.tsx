@@ -156,7 +156,7 @@ export default function RestaurantRegister() {
   return (
     <div className="ob-shell">
       <header className="ob-header">
-        <div className="ob-header-brand">🍽 {ckName}</div>
+        <div className="ob-header-brand"><img src="/Qken_logo.svg" alt="Qken" className="login-logo-img" /></div>
         <h1 className="ob-header-title">Restaurant Registration</h1>
         <p className="ob-header-sub">Complete your details below to join the ordering platform</p>
       </header>

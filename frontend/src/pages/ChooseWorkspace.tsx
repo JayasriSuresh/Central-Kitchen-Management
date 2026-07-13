@@ -89,7 +89,7 @@ export default function ChooseWorkspace() {
       <div className="login-card" style={{ maxWidth: '500px', width: '100%', borderRadius: '8px', padding: '2.5rem' }}>
         <div className="login-brand" style={{ marginBottom: '2rem' }}>
           <div className="login-logo" style={{ fontSize: '1.5rem', fontWeight: 700 }}>
-            🍽 Central Kitchen ERP
+            <img src="/Qken_logo.svg" alt="Qken" className="login-logo-img" />
           </div>
           <p style={{ fontSize: '0.875rem', color: 'var(--text-light)', marginTop: '0.5rem' }}>
             Welcome back, {user?.name}. Please select a workspace to continue.
